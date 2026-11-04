@@ -1,0 +1,32 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment files
+.env
+.env.*
+
+# VS Code settings
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data (raw pulls, season aggregates, indexes - keep out of git)
+/data/
+/stats/
+*.json
+*.jsonl
+!package.json
+!tsconfig*.json
+
+# Hand-picked example outputs for reading (small, tracked)
+!/examples/
+!/examples/*.json
