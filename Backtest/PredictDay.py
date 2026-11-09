@@ -126,6 +126,21 @@ def FetchSlate(game_date: str) -> list:
         raise RuntimeError(f"ScoreboardV2 failed ({primary}); CDN returned no games") from primary
 
 
+
+def DeduplicateSlateByGameId(slate: list) -> list:
+    """Keep the first row per game_id (ScoreboardV2 sometimes repeats a game)."""
+    seen = set()
+    out = []
+    for game in slate:
+        gid = game.get("game_id")
+        if gid in seen:
+            continue
+        if gid is not None:
+            seen.add(gid)
+        out.append(game)
+    return out
+
+
 def FormatLine(game: dict) -> str:
     """Moneyline pair for the table, or '-' when odds are absent."""
     hm, am = game.get("home_moneyline"), game.get("away_moneyline")
@@ -167,7 +182,7 @@ def Main() -> None:
     season = args.season or (day.year if day.month >= 10 else day.year - 1)
 
     features, model, played = BuildState(season, args.date)
-    slate = FetchSlate(args.date)
+    slate = DeduplicateSlateByGameId(FetchSlate(args.date))
     strategies = DefaultStrategies()
     rows = []
     for game in slate:

@@ -75,5 +75,17 @@ class PredictDayScoreboardTests(unittest.TestCase):
         self.assertEqual(slate[0]["line"], "-")
 
 
+
+    def test_deduplicate_slate_by_game_id(self):
+        slate = [
+            {"game_id": "a", "home_team": "ATL", "away_team": "LAL"},
+            {"game_id": "a", "home_team": "ATL", "away_team": "LAL"},  # duplicate
+            {"game_id": "b", "home_team": "BOS", "away_team": "NYK"},
+        ]
+        out = PredictDay.DeduplicateSlateByGameId(slate)
+        self.assertEqual([g["game_id"] for g in out], ["a", "b"])
+        self.assertEqual(len(out), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
