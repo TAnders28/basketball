@@ -28,6 +28,8 @@ from Backtest.Strategies import (
 
 SEASON_DIR = os.path.join("data", "season")
 REPORT_DIR = os.path.join("data", "backtest", "reports")
+# Absolute accuracy gain below this stops further grid search (0.5 percentage points).
+MIN_GAIN = 0.005
 
 
 def LoadJson(path: str) -> list:
@@ -48,7 +50,7 @@ def StrategiesFromSettings(settings: dict) -> list:
 
 
 def SettingsGrid() -> list:
-    """Small, fixed grid — count of settings tried is reported."""
+    """Small, fixed grid — count of settings tried is reported (may stop early)."""
     grid = []
     for min_games, min_gap, min_edge in itertools.product((3, 5, 8), (1, 2), (0.03, 0.05, 0.08)):
         grid.append({"min_games": min_games, "min_gap": min_gap, "min_edge": min_edge})
@@ -117,15 +119,22 @@ def MeanAccuracy(result: dict, strategy_name: str = "elo_pick") -> float:
     return float(s.get("accuracy") or 0.0)
 
 
-def CompositeTuneScore(results: list) -> float:
-    """Mean of elo_pick accuracy across tune seasons (primary selection metric)."""
+def CompositeTuneScore(results: list, names: tuple = ("better_record", "rest_advantage")) -> float:
+    """Mean accuracy of tunable strategies across tune seasons.
+
+    elo_pick / always_home do not depend on SettingsGrid knobs, so they are not the
+    selection objective (they are still scored on holdout for baseline comparison).
+    """
     if not results:
         return 0.0
-    return sum(MeanAccuracy(r) for r in results) / len(results)
+    scores = []
+    for r in results:
+        for name in names:
+            scores.append(MeanAccuracy(r, name))
+    return sum(scores) / len(scores) if scores else 0.0
 
 
 def WorstSeasonRank(holdout_result: dict) -> list:
-    """Strategies ranked by accuracy ascending (worst first) on the holdout season."""
     rows = []
     for name, s in holdout_result["strategies"].items():
         rows.append({"strategy": name, "accuracy": s.get("accuracy"), "picks": s.get("picks"),
@@ -136,30 +145,56 @@ def WorstSeasonRank(holdout_result: dict) -> list:
     return rows
 
 
-def RunHoldout(tune_seasons: list, holdout: int) -> dict:
+def ScoreTuneSeasons(tune_seasons: list, strategies: list) -> list:
+    tune_results = []
+    for season in tune_seasons:
+        games = LoadJson(os.path.join(SEASON_DIR, f"games_{season}.json"))
+        if not games:
+            raise SystemExit(f"missing data/season/games_{season}.json")
+        prior = LoadJson(os.path.join(SEASON_DIR, f"games_{season - 1}.json"))
+        prior_ratings = SeasonFinalRatings(prior) if prior else None
+        books = RunSeason(games, strategies, prior_ratings)
+        tune_results.append({
+            "season": str(season), "games": len(games),
+            "strategies": {s.name: Summarize(books[s.name]) for s in strategies},
+        })
+    return tune_results
+
+
+
+def RunHoldout(tune_seasons: list, holdout: int, second_look: int = None,
+               min_gain: float = MIN_GAIN) -> dict:
+    """Tune on tune_seasons with early stop when best-score gain < min_gain; freeze; score holdout once.
+    Optionally score the same frozen settings on second_look (e.g. partial current season)."""
     grid = SettingsGrid()
     trials = []
     best = None
+    stopped_early = False
     for settings in grid:
         strategies = StrategiesFromSettings(settings)
-        tune_results = []
-        for season in tune_seasons:
-            games = LoadJson(os.path.join(SEASON_DIR, f"games_{season}.json"))
-            if not games:
-                raise SystemExit(f"missing data/season/games_{season}.json")
-            prior = LoadJson(os.path.join(SEASON_DIR, f"games_{season - 1}.json"))
-            # Don't write per-trial pick CSVs for every grid cell — score in memory.
-            prior_ratings = SeasonFinalRatings(prior) if prior else None
-            books = RunSeason(games, strategies, prior_ratings)
-            summary = {"season": str(season), "games": len(games),
-                       "strategies": {s.name: Summarize(books[s.name]) for s in strategies}}
-            tune_results.append(summary)
+        tune_results = ScoreTuneSeasons(tune_seasons, strategies)
         score = CompositeTuneScore(tune_results)
-        trial = {"settings": settings, "tune_score_elo_pick": score,
+        prev_best = None if best is None else best["tune_score"]
+        gain = None if prev_best is None else (score - prev_best)
+        trial = {"settings": settings, "tune_score": score, "tune_score_elo_pick": CompositeTuneScore(tune_results, ("elo_pick",)),
+                 "gain_vs_best_before": gain,
                  "n_per_season": {r["season"]: r["games"] for r in tune_results}}
         trials.append(trial)
-        if best is None or score > best["tune_score_elo_pick"]:
-            best = {"settings": settings, "tune_score_elo_pick": score, "tune_results": tune_results}
+        if best is None or score > best["tune_score"]:
+            improved_by = None if best is None else (score - best["tune_score"])
+            best = {"settings": settings, "tune_score": score, "tune_results": tune_results,
+                    "tune_score_elo_pick": trial["tune_score_elo_pick"]}
+            # After the first setting, stop when a new best improves by under min_gain.
+            if improved_by is not None and improved_by < min_gain:
+                stopped_early = True
+                break
+        else:
+            # No new best: if last few trials also failed to beat best by min_gain, stop.
+            if len(trials) >= 4:
+                recent = trials[-4:]
+                if all((t["tune_score"] - best["tune_score"]) < min_gain for t in recent):
+                    stopped_early = True
+                    break
 
     frozen = StrategiesFromSettings(best["settings"])
     holdout_games = LoadJson(os.path.join(SEASON_DIR, f"games_{holdout}.json"))
@@ -168,7 +203,16 @@ def RunHoldout(tune_seasons: list, holdout: int) -> dict:
     holdout_result = RunOne(str(holdout), holdout_games,
                             LoadJson(os.path.join(SEASON_DIR, f"games_{holdout - 1}.json")),
                             strategies=frozen)
-    # Also materialize tune-season reports with frozen settings once.
+
+    second_result = None
+    if second_look is not None:
+        second_games = LoadJson(os.path.join(SEASON_DIR, f"games_{second_look}.json"))
+        if not second_games:
+            raise SystemExit(f"missing data/season/games_{second_look}.json")
+        second_result = RunOne(f"{second_look}_partial", second_games,
+                               LoadJson(os.path.join(SEASON_DIR, f"games_{second_look - 1}.json")),
+                               strategies=frozen)
+
     frozen_tune = []
     for season in tune_seasons:
         frozen_tune.append(RunOne(
@@ -178,27 +222,48 @@ def RunHoldout(tune_seasons: list, holdout: int) -> dict:
             strategies=frozen,
         ))
 
+    seasons_for_n = list(tune_seasons) + [holdout]
+    if second_look is not None:
+        seasons_for_n.append(second_look)
     payload = {
         "mode": "holdout",
         "tune_seasons": tune_seasons,
         "holdout_season": holdout,
-        "settings_tried": len(grid),
+        "second_look_season": second_look,
+        "settings_tried": len(trials),
+        "settings_grid_size": len(grid),
+        "stopped_early": stopped_early,
+        "min_gain": min_gain,
+        "selection_metric": "mean_accuracy(better_record, rest_advantage) over tune seasons",
         "selected_settings": best["settings"],
+        "tune_score": best["tune_score"],
         "tune_score_elo_pick": best["tune_score_elo_pick"],
         "n_per_season": {str(s): len(LoadJson(os.path.join(SEASON_DIR, f"games_{s}.json")))
-                         for s in tune_seasons + [holdout]},
+                         for s in seasons_for_n},
         "worst_season_rank_on_holdout": WorstSeasonRank(holdout_result),
         "holdout": holdout_result,
-        "trials_head": trials[:5],  # keep report small; full count is settings_tried
+        "second_look": second_result,
+        "baseline_holdout": {
+            "always_home": holdout_result["strategies"].get("always_home"),
+            "better_record": holdout_result["strategies"].get("better_record"),
+            "elo_pick": holdout_result["strategies"].get("elo_pick"),
+        },
+        "trials": trials,
     }
     os.makedirs(REPORT_DIR, exist_ok=True)
     path = os.path.join(REPORT_DIR, f"holdout_{holdout}.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
-    note = (f"Tuned on seasons {tune_seasons} ({len(grid)} settings tried); froze "
-            f"{best['settings']}; scored once on holdout {holdout}. "
-            f"N/season={payload['n_per_season']}. See holdout_{holdout}.json.")
-    WriteMarkdown(frozen_tune + [holdout_result], holdout_note=note)
+    note = (f"Tuned on seasons {tune_seasons} ({len(trials)} settings tried"
+            f"{', stopped early' if stopped_early else ''} of {len(grid)}; min_gain={min_gain}); "
+            f"selection={payload['selection_metric']}; froze {best['settings']}; "
+            f"scored once on holdout {holdout}"
+            + (f"; second look {second_look}" if second_look is not None else "")
+            + f". N/season={payload['n_per_season']}. See holdout_{holdout}.json.")
+    md_results = frozen_tune + [holdout_result]
+    if second_result is not None:
+        md_results.append(second_result)
+    WriteMarkdown(md_results, holdout_note=note)
     return payload
 
 
@@ -208,17 +273,23 @@ def Main() -> None:
     parser.add_argument("--games-file", help="backtest one JSON games file instead (e.g. examples/games_sample.json)")
     parser.add_argument("--tune", help="comma-separated seasons used only to select settings (holdout mode)")
     parser.add_argument("--holdout", type=int, help="single season scored once after freeze (holdout mode)")
+    parser.add_argument("--second-look", type=int, default=None,
+                        help="optional extra season scored once with frozen settings (e.g. partial current)")
+    parser.add_argument("--min-gain", type=float, default=MIN_GAIN,
+                        help="stop search when elo_pick tune-score gain is below this (default 0.005 = 0.5 pts)")
     args = parser.parse_args()
 
     if args.tune or args.holdout:
         if not args.tune or args.holdout is None:
             raise SystemExit("holdout mode needs both --tune SEASONS and --holdout SEASON")
         tune_seasons = [int(s) for s in args.tune.split(",") if s.strip()]
-        payload = RunHoldout(tune_seasons, args.holdout)
-        print(f"holdout mode: settings_tried={payload['settings_tried']} "
-              f"selected={payload['selected_settings']} "
+        payload = RunHoldout(tune_seasons, args.holdout, second_look=args.second_look, min_gain=args.min_gain)
+        print(f"holdout mode: settings_tried={payload['settings_tried']}/{payload['settings_grid_size']} "
+              f"stopped_early={payload['stopped_early']} selected={payload['selected_settings']} "
               f"n_per_season={payload['n_per_season']}")
         print("\n".join(TableLines(payload["holdout"])))
+        if payload.get("second_look"):
+            print("\n".join(TableLines(payload["second_look"])))
         print("worst-season rank (holdout, worst first):")
         for row in payload["worst_season_rank_on_holdout"]:
             acc = f"{row['accuracy'] * 100:.1f}%" if row["accuracy"] is not None else "n/a"
@@ -246,3 +317,4 @@ def Main() -> None:
 
 if __name__ == "__main__":
     Main()
+
