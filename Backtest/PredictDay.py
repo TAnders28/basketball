@@ -7,7 +7,7 @@ as the backtest (no new model). Only completed games dated BEFORE the target day
 
 Needs data/season/games_<season>.json (and games_<season-1>.json to seed Elo) from GetSeasonGames.py.
 Schedule comes from stats.nba.com ScoreboardV2 (GameHeader + LineScore for abbreviations / tip time).
-Writes data/backtest/predictions/picks_<date>.json and .md (gitignored with the rest of data/).
+Writes data/backtest/predictions/picks_<date>.json and .md, and appends data/predictions/<season>.jsonl.
 """
 
 import argparse
@@ -21,6 +21,7 @@ from Backtest.Engine import Completed, PreGameView
 from Backtest.Features import FeatureBook
 from Backtest.Model import EloModel, SeasonFinalRatings
 from Backtest.Strategies import DefaultStrategies
+from Backtest.PredictionLog import AppendPredictionRows, MODEL_VERSION
 
 SEASON_DIR = os.path.join("data", "season")
 PRED_DIR = os.path.join("data", "backtest", "predictions")
@@ -126,8 +127,12 @@ def Main() -> None:
     text = "\n".join(lines)
     with open(os.path.join(PRED_DIR, f"picks_{args.date}.md"), "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
+    log_path = AppendPredictionRows(season, rows, source="PredictDay")
     print(text)
+    print(f"appended {len(rows)} rows -> {log_path} (model_version={MODEL_VERSION})")
 
 
 if __name__ == "__main__":
     Main()
+
+
