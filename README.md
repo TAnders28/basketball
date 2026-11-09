@@ -15,8 +15,9 @@ NBA statistic retrieval and strategy backtesting. Same layout as `football` / `b
   - `Odds.py` - American odds helpers (used once games carry moneylines)
   - `RunBacktest.py` - CLI runner + report
 - `PlayByPlay/` - play-by-play (placeholder)
+- `LiveOdds/` - read-only current quotes (Polymarket, Kalshi, NBA scoreboard). No orders. No in-play model.
 - `examples/` - small tracked sample outputs (`games_sample.json`)
-- `docs/` - notes and writeups
+- `docs/` - notes and writeups (`docs/live_odds.md`)
 
 ## Setup
 
@@ -41,6 +42,17 @@ Reports go to `data/backtest/reports/` (`REPORT.md`, `report_<season>.json`, `pi
 
 Free NBA game logs have no betting lines, so strategies are scored on pick accuracy. If a game record
 has `home_moneyline` / `away_moneyline`, the engine also runs a $10,000 flat-$200-stake bankroll.
+
+## Live odds
+
+Public GETs only. Pregame Elo is not reused as a live probability, and a market price is not a forecast.
+`assessment` stays `unavailable` until a validated in-play model exists. Details, freshness rules, and the smoke command are in `docs/live_odds.md`.
+
+```text
+python -m LiveOdds.Report --date 2026-11-08
+python -m LiveOdds.Smoke
+python -m unittest tests.test_live_odds
+```
 
 ## Conventions
 
