@@ -272,6 +272,30 @@ def FetchBooksAndFees(http, markets) -> tuple:
     return books, fees
 
 
+def FetchPlayByPlay(http, scoreboard: dict) -> dict:
+    """One public play-by-play read per scoreboard game. timeActual is the offset clock."""
+    plays = {}
+    games = (((scoreboard or {}).get("body") or {}).get("scoreboard") or {}).get("games") or []
+    for game in games:
+        game_id = str(game.get("gameId") or "")
+        if not game_id:
+            continue
+        url = f"https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json"
+        got = http.GetJson(url, NBA_HEADERS)
+        plays[game_id] = {"url": url, "observed_at": got.get("observed_at"),
+                          "error": None if got["ok"] else (got.get("error") or "source_outage"),
+                          "body": got.get("body") if got["ok"] else None}
+    return plays
+
+
+def FetchKalshiSeries(http) -> dict:
+    url = f"https://external-api.kalshi.com/trade-api/v2/series/{KALSHI_SERIES}"
+    got = http.GetJson(url)
+    return {"url": url, "observed_at": got.get("observed_at"),
+            "error": None if got["ok"] else (got.get("error") or "source_outage"),
+            "body": got.get("body") if got["ok"] else None}
+
+
 def FetchScoreboard(http) -> dict:
     got = http.GetJson(NBA_SCOREBOARD_URL, NBA_HEADERS)
     if not got["ok"]:
@@ -309,6 +333,8 @@ def LoadBundle(game_date: str, http=None, pregame_model=None, live_sample: bool 
     if poly_error is None:
         books, fees = FetchBooksAndFees(http, kept)
     scoreboard = FetchScoreboard(http)
+    play_by_play = FetchPlayByPlay(http, scoreboard) if not scoreboard.get("error") else {}
+    kalshi_series = FetchKalshiSeries(http)
     kalshi_raw, kalshi_error = FetchKalshiMarkets(http)
     kalshi_kept = []
     if kalshi_error is None:
@@ -326,6 +352,8 @@ def LoadBundle(game_date: str, http=None, pregame_model=None, live_sample: bool 
         "fees": fees,
         "scoreboard_error": scoreboard.get("error"),
         "scoreboard": scoreboard,
+        "play_by_play": play_by_play,
+        "kalshi_series": kalshi_series,
         "kalshi_error": kalshi_error,
         "kalshi_markets": kalshi_raw if kalshi_error is None else [],
         "kalshi_books": FetchKalshiBooks(http, kalshi_kept) if kalshi_error is None else {},

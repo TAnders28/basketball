@@ -11,6 +11,8 @@ MAX_FUTURE_SKEW_SECONDS = 5
 MAX_LIVE_QUOTE_AGE_SECONDS = 30
 MAX_PREGAME_QUOTE_AGE_SECONDS = 180
 MAX_GAME_STATE_AGE_SECONDS = 45
+# Our fail-closed window for calling a quote and a score the same moment. Not an NBA SLA.
+MAX_QUOTE_STATE_SKEW_SECONDS = 30
 # Two outcome books are one snapshot only when their source timestamps agree this closely.
 MAX_BOOK_TIMESTAMP_GAP_SECONDS = 2
 

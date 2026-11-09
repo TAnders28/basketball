@@ -188,8 +188,13 @@ class LiveOddsTests(unittest.TestCase):
         self.assertEqual(game["identity"]["event"], "https://polymarket.com/event/nba-uta-min-2026-11-08")
         self.assertEqual(game["identity"]["condition_id"], "0xabc")
         self.assertEqual(game["indicative_gamma"]["tag"], "indicative")
-        self.assertEqual(game["fees"]["status"], "sources_disagree")
+        self.assertEqual(game["fees"]["status"], "unreconciled")
+        self.assertIsNone(game["fees"]["single_fee_rate"])
+        self.assertFalse(game["fees"]["reconciled"])
+        self.assertTrue(game["fees"]["maker_fields_unreconciled"])
         self.assertIsNone(game["fees"]["fee_adjusted_probability"])
+        self.assertIsNone(game["models"]["inplay_model"]["calibrated_live_probability"])
+        self.assertFalse(game["models"]["inplay_model"]["historical_state_odds_validation"])
         self.assertTrue(game["settlement"]["includes_overtime"])
         self.assertEqual(game["game_state"]["freshness"], "unknown")
         self.assertEqual(game["game_state"]["timezone_resolution"], "naive_no_offset")
@@ -336,35 +341,102 @@ class LiveOddsTests(unittest.TestCase):
         silent_report = BuildReport(_bundle(market=silent, scoreboard=overtime))
         self.assertIn("overtime_settlement_unknown", silent_report["games"][0]["quote"]["blockers"])
         self.assertIsNone(silent_report["games"][0]["settlement"]["includes_overtime"])
+        redemption = silent_report["games"][0]["settlement"]["platform_redemption"]
+        self.assertEqual(redemption["winning_token"], "1 pUSD")
+        self.assertFalse(redemption["decides_overtime"])
 
-    def test_fees_unknown_sourced_and_disagreement_never_assume_zero(self):
+    def test_fees_are_not_converted_or_assumed_zero(self):
         unknown = FeeStatus({}, {}, ["111"])
         self.assertEqual(unknown["status"], "unknown")
+        self.assertIsNone(unknown["single_fee_rate"])
         self.assertFalse(unknown["assumed_zero"])
         self.assertIsNone(unknown["fee_adjusted_probability"])
 
-        sourced = FeeStatus({
+        # 0.03 and 300 bps would match only under an undocumented conversion. Do not apply it.
+        both = FeeStatus({
             "fee_schedule": {"rate": "0.03", "taker_only": True},
             "fees_enabled": True, "maker_base_fee": 0, "taker_base_fee": 300,
         }, {"111": {"base_fee": 300}}, ["111"])
-        self.assertEqual(sourced["status"], "sourced")
-        self.assertIsNone(sourced["fee_adjusted_probability"])
-        self.assertFalse(sourced["source_says_zero"])
+        self.assertEqual(both["status"], "unreconciled")
+        self.assertIsNone(both["single_fee_rate"])
+        self.assertFalse(both["reconciled"])
+        self.assertIsNone(both["fee_adjusted_probability"])
+
+        curve_and_bps = FeeStatus({
+            "fee_schedule": {"rate": "0.05", "exponent": 1, "taker_only": True},
+            "fees_enabled": True, "maker_base_fee": 1000, "taker_base_fee": 1000,
+        }, {"111": {"base_fee": 1000}}, ["111"])
+        self.assertEqual(curve_and_bps["status"], "unreconciled")
+        self.assertIsNone(curve_and_bps["single_fee_rate"])
+        self.assertTrue(curve_and_bps["maker_fields_unreconciled"])
 
         zero = FeeStatus({
             "fee_schedule": {"rate": 0, "taker_only": True},
             "fees_enabled": False, "maker_base_fee": 0, "taker_base_fee": 0,
         }, {"111": {"base_fee": 0}}, ["111"])
-        self.assertEqual(zero["status"], "sourced")
+        self.assertEqual(zero["status"], "explicit_zero")
         self.assertTrue(zero["source_says_zero"])
         self.assertFalse(zero["assumed_zero"])
+        self.assertIsNone(zero["single_fee_rate"])
 
-        conflict = FeeStatus({
+        not_zero = FeeStatus({
             "fee_schedule": {"rate": 0, "taker_only": True},
             "fees_enabled": False, "maker_base_fee": 0,
         }, {"111": {"base_fee": 1000}}, ["111"])
-        self.assertEqual(conflict["status"], "sources_disagree")
-        self.assertFalse(conflict["assumed_zero"])
+        self.assertEqual(not_zero["status"], "unreconciled")
+        self.assertFalse(not_zero["source_says_zero"])
+        self.assertFalse(not_zero["assumed_zero"])
+
+    def test_offset_play_aligns_score_without_creating_an_edge(self):
+        moment = OBSERVED - timedelta(seconds=2)
+        stamped = moment.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        bundle = _bundle(meta="2026-11-08 08:42:32.4232")
+        bundle["play_by_play"] = {"0022600999": {
+            "observed_at": OBSERVED, "error": None,
+            "body": {"game": {"actions": [
+                {"actionNumber": 1, "timeActual": "2026-11-08 20:00:00", "scoreHome": "1", "scoreAway": "1",
+                 "period": 1, "periodType": "REGULAR", "clock": "PT11M00.00S"},
+                {"actionNumber": 2, "timeActual": stamped, "scoreHome": "70", "scoreAway": "63",
+                 "period": 3, "periodType": "REGULAR", "clock": "PT05M33.00S"},
+            ]}},
+        }}
+        game = BuildReport(bundle)["games"][0]
+        self.assertEqual(game["readiness_tier"], "executable_quote")
+        self.assertEqual(game["assessment_tier"], "unavailable")
+        self.assertEqual(game["game_state"]["source"], "nba_cdn_playbyplay")
+        self.assertEqual(game["game_state"]["timezone_resolution"], "explicit_offset")
+        self.assertTrue(game["game_state"]["scoreboard_meta_time_not_used"])
+        self.assertEqual(game["game_state"]["home"]["score"], 70)
+        self.assertEqual(game["game_state"]["away"]["score"], 63)
+        self.assertIsNone(game["models"]["inplay_model"]["calibrated_live_probability"])
+        self.assertLessEqual(game["game_state"]["quote_state_gap_seconds"], 30)
+
+        naive = dict(bundle)
+        naive["play_by_play"] = {"0022600999": {
+            "observed_at": OBSERVED, "error": None,
+            "body": {"game": {"actions": [
+                {"actionNumber": 2, "timeActual": "2026-11-08 20:57:20", "scoreHome": "70", "scoreAway": "63",
+                 "period": 3, "periodType": "REGULAR"},
+            ]}},
+        }}
+        naive_game = BuildReport(naive)["games"][0]
+        self.assertEqual(naive_game["game_state"]["freshness"], "unknown")
+        self.assertFalse(naive_game["game_state"]["usable"])
+        self.assertNotEqual(naive_game["readiness_tier"], "executable_quote")
+        self.assertTrue(naive_game["game_state"]["scoreboard_meta_time_not_used"])
+
+        stale_at = (OBSERVED - timedelta(seconds=120)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        late = dict(bundle)
+        late["play_by_play"] = {"0022600999": {
+            "observed_at": OBSERVED, "error": None,
+            "body": {"game": {"actions": [
+                {"actionNumber": 9, "timeActual": stale_at, "scoreHome": "70", "scoreAway": "63",
+                 "period": 3, "periodType": "REGULAR"},
+            ]}},
+        }}
+        late_game = BuildReport(late)["games"][0]
+        self.assertNotEqual(late_game["readiness_tier"], "executable_quote")
+        self.assertTrue(set(late_game["game_state"]["blockers"]) & {"game_state_stale", "quote_state_not_synchronized"})
 
     def test_kalshi_metadata_time_is_not_a_quote_time(self):
         markets = []
@@ -469,8 +541,9 @@ class LiveOddsTests(unittest.TestCase):
         report = BuildReport(bundle)
         self.assertTrue(routes)
         self.assertTrue(all(url.startswith("https://") for url in routes))
-        self.assertEqual(report["games"][0]["readiness_tier"], "executable_unaligned")
-        self.assertEqual(report["games"][0]["game_state"]["timezone_resolution"], "naive_no_offset")
+        self.assertNotEqual(report["games"][0]["readiness_tier"], "executable_quote")
+        self.assertFalse(report["games"][0]["game_state"]["usable"])
+        self.assertIsNone(report["games"][0]["game_state"].get("timestamp_utc"))
         self.assertEqual(report["assessment_tier"], "unavailable")
         self.assertFalse(report["live_sample"])
 

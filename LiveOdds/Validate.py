@@ -7,8 +7,8 @@ Nothing here computes expected value.
 from decimal import Decimal
 
 from LiveOdds.Time import (
-    MAX_BOOK_TIMESTAMP_GAP_SECONDS, AgeSeconds, FormatEt, FormatUtc, Freshness, GapSeconds,
-    ParseInstant, QuoteMaxAge,
+    MAX_BOOK_TIMESTAMP_GAP_SECONDS, MAX_GAME_STATE_AGE_SECONDS, MAX_QUOTE_STATE_SKEW_SECONDS,
+    AgeSeconds, FormatEt, FormatUtc, Freshness, GapSeconds, ParseInstant, QuoteMaxAge,
 )
 
 ONE = Decimal("1")
@@ -49,10 +49,12 @@ def _Sentence(text: str, needle: str):
 
 
 def FeeStatus(market: dict, clob_fees: dict, token_ids=None) -> dict:
-    """Record every sourced fee field. Disagreeing sources stay unresolved. Never assume zero.
+    """Record fee fields under the roles the docs give them. Do not pick one number.
 
-    `sourced` requires gamma feeSchedule.rate and every token's CLOB base_fee to be the same rate.
-    Gamma alone is not enough: the per-token fee endpoint is the contract-specific source.
+    The 31 Mar 2026 changelog says to calculate fees from `feeSchedule`.
+    `GET /fee-rate` documents `base_fee` as basis points. `GET /clob-markets/{condition_id}`
+    documents both `fd` (rate, exponent, taker-only) and `mbf`/`tbf` (basis points).
+    Nothing we read says `base_fee == feeSchedule.rate × 10000`, so that conversion is not applied.
     """
     schedule = market.get("fee_schedule")
     rate = None
@@ -66,49 +68,50 @@ def FeeStatus(market: dict, clob_fees: dict, token_ids=None) -> dict:
     taker = market.get("taker_base_fee")
     fees_enabled = market.get("fees_enabled")
     taker_only = schedule.get("taker_only") if isinstance(schedule, dict) else None
-    conflicts = []
-    expected_bps = None
-    if rate is not None:
-        expected_bps = int((rate * Decimal("10000")).to_integral_value())
-        for token_id, bps in base_fees.items():
-            if bps != expected_bps:
-                conflicts.append(
-                    f"gamma feeSchedule.rate {rate} ({expected_bps} bps) != clob base_fee {bps} for token {token_id}")
-    if taker_only is True and maker not in (None, 0):
-        conflicts.append(f"feeSchedule.takerOnly is true but makerBaseFee is {maker}")
-    if fees_enabled is False and any(bps != 0 for bps in base_fees.values()):
-        conflicts.append("feesEnabled is false but clob base_fee is not 0")
     required = [str(token_id) for token_id in (token_ids or [])]
     missing = [token_id for token_id in required if token_id not in base_fees]
-    agreed = (rate is not None and expected_bps is not None and not missing and base_fees
-              and all(bps == expected_bps for bps in base_fees.values()))
-    if conflicts:
-        status = "sources_disagree"
-    elif agreed:
-        status = "sourced"
+    maker_unreconciled = taker_only is True and maker not in (None, 0)
+    explicit_zero = (rate == 0 and base_fees and all(bps == 0 for bps in base_fees.values())
+                     and not missing and maker in (None, 0) and taker in (None, 0)
+                     and fees_enabled is False)
+    if explicit_zero:
+        status = "explicit_zero"
+    elif rate is not None and base_fees:
+        status = "unreconciled"
+    elif rate is not None or base_fees:
+        status = "partial"
     else:
         status = "unknown"
     return {
         "status": status,
         "assumed_zero": False,
-        "source_says_zero": status == "sourced" and expected_bps == 0,
+        "source_says_zero": status == "explicit_zero",
+        "reconciled": False,
+        "single_fee_rate": None,
+        "documented_equivalence": None,
+        "maker_fields_unreconciled": maker_unreconciled,
         "clob_fee_tokens_missing": missing,
         "fee_adjusted_probability": None,
         "fee_adjusted_reason": (
-            "Fee-adjusted prices are not computed. A fee is a trading cost, not a win probability, "
-            "and disagreeing or missing fee sources are left unresolved."),
+            "No single fee rate is selected. feeSchedule is the documented calculation object, "
+            "and CLOB base_fee is a separate basis-point field. A fee-adjusted price is not computed."),
+        "field_roles": {
+            "feeSchedule": "calculation source per the 31 Mar 2026 changelog; rate is the base rate in the published formula",
+            "clob_base_fee": "basis points on GET /fee-rate; not converted into feeSchedule.rate",
+            "makerBaseFee_takerBaseFee": "recorded as returned; not treated as the feeSchedule rate",
+        },
         "gamma_fees_enabled": fees_enabled,
         "gamma_fee_type": market.get("fee_type"),
         "gamma_fee_schedule": schedule,
         "gamma_maker_base_fee": maker,
         "gamma_taker_base_fee": taker,
         "clob_base_fee_bps": base_fees or None,
-        "conflicts": conflicts,
         "sources": [
-            "https://gamma-api.polymarket.com market feesEnabled/feeSchedule/makerBaseFee/takerBaseFee",
-            "https://clob.polymarket.com/fee-rate?token_id= GET base_fee (basis points)",
+            "https://docs.polymarket.com/changelog/predictions",
+            "https://docs.polymarket.com/market-data/market-details",
             "https://docs.polymarket.com/trading/fees",
             "https://docs.polymarket.com/api-reference/market-data/get-fee-rate",
+            "https://docs.polymarket.com/api-reference/markets/get-clob-market-info",
         ],
     }
 
@@ -316,8 +319,12 @@ def GuardModels(pregame_model) -> dict:
         "inplay_model": {
             "available": False,
             "validated": False,
+            "historical_state_odds_validation": False,
+            "calibrated_live_probability": None,
             "probability": None,
-            "reason": "No validated in-play win model exists in this repository.",
+            "reason": (
+                "No validated in-play win model exists. Pregame Elo backtests are not a live "
+                "calibration, and a live probability is not invented from them."),
         },
         "market_implied_probability_is_model_forecast": False,
         "supported_edge": None,
@@ -413,6 +420,112 @@ def EvaluateGameState(game, resolved_time: dict, observed_at, scoreboard_date: s
         "blockers": blockers,
         "note": "meta.time has no offset. A naive clock stays freshness unknown. It is not assigned UTC or Eastern by comparing it with the observation.",
     }
+
+
+def LatestOffsetPlay(body: dict):
+    """Latest play whose timeActual has an explicit offset. Naive clocks are skipped."""
+    actions = ((body or {}).get("game") or {}).get("actions") or []
+    chosen = None
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        moment, _kind = ParseInstant(action.get("timeActual"))
+        if moment is None:
+            continue
+        try:
+            number = int(action.get("actionNumber"))
+        except (TypeError, ValueError):
+            number = -1
+        if chosen is None or (moment, number) > chosen[0]:
+            chosen = ((moment, number), action, moment)
+    if chosen is None:
+        return None
+    return {"action": chosen[1], "utc": chosen[2]}
+
+
+def GameStateFromPlay(play: dict, observed_at, scoreboard_game: dict, scoreboard_date: str, requested_date: str) -> dict:
+    """Score and clock from one play-by-play action. timeActual is the as-of, not meta.time."""
+    blockers = []
+    action, moment = play["action"], play["utc"]
+    if scoreboard_date != requested_date:
+        blockers.append("scoreboard_date_mismatch")
+    freshness = Freshness(moment, observed_at, MAX_GAME_STATE_AGE_SECONDS) if observed_at else "unknown"
+    if freshness != "fresh":
+        blockers.append("game_state_" + freshness)
+    phase = PhaseFromScoreboard(scoreboard_game) if scoreboard_game else "unknown"
+    period_type = _Text(action.get("periodType")).upper()
+    try:
+        period = int(action.get("period") or 0)
+    except (TypeError, ValueError):
+        period = 0
+        blockers.append("period_missing")
+    try:
+        regulation = int((scoreboard_game or {}).get("regulationPeriods") or 4)
+    except (TypeError, ValueError):
+        regulation = 4
+    if phase != "final" and (period_type == "OVERTIME" or period > regulation):
+        phase = "overtime"
+    try:
+        home_score = int(str(action.get("scoreHome")))
+        away_score = int(str(action.get("scoreAway")))
+    except (TypeError, ValueError):
+        home_score = away_score = None
+        blockers.append("score_missing")
+    home = (scoreboard_game or {}).get("homeTeam") or {}
+    away = (scoreboard_game or {}).get("awayTeam") or {}
+    game_id = (scoreboard_game or {}).get("gameId")
+    return {
+        "source": "nba_cdn_playbyplay",
+        "source_url": f"https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json",
+        "documented_via": "nba_api.live.nba.endpoints.playbyplay.PlayByPlay timeActual",
+        "usable": not blockers,
+        "freshness": freshness,
+        "timezone_resolution": "explicit_offset",
+        "raw_time_actual": action.get("timeActual"),
+        "timestamp_utc": FormatUtc(moment),
+        "timestamp_et": FormatEt(moment),
+        "age_seconds": AgeSeconds(moment, observed_at) if observed_at else None,
+        "observed_at_utc": FormatUtc(observed_at) if observed_at else None,
+        "observed_at_et": FormatEt(observed_at) if observed_at else None,
+        "phase": phase,
+        "overtime": phase == "overtime",
+        "regulation_periods": (scoreboard_game or {}).get("regulationPeriods"),
+        "period": action.get("period"),
+        "period_type": action.get("periodType"),
+        "clock": action.get("clock"),
+        "status_text": (scoreboard_game or {}).get("gameStatusText"),
+        "action_number": action.get("actionNumber"),
+        "game_id": game_id,
+        "home": {"abbr": (home.get("teamTricode") or "").upper(), "name": home.get("teamName"), "score": home_score},
+        "away": {"abbr": (away.get("teamTricode") or "").upper(), "name": away.get("teamName"), "score": away_score},
+        "blockers": blockers,
+        "scoreboard_meta_time_not_used": True,
+        "note": "timeActual has an explicit offset and is the score as-of. Scoreboard meta.time is not used.",
+    }
+
+
+def SynchronizeQuoteAndState(state: dict, quote_time_utc) -> dict:
+    """Refuse alignment when the quote snapshot and the score as-of are too far apart."""
+    if not state:
+        return state
+    state = dict(state)
+    blockers = list(state.get("blockers") or [])
+    quote_time, _kind = ParseInstant(quote_time_utc) if quote_time_utc else (None, "missing")
+    state_time, _kind = ParseInstant(state.get("timestamp_utc"))
+    if quote_time is None or state_time is None:
+        if state.get("usable"):
+            state["usable"] = False
+            blockers.append("quote_state_not_synchronized")
+        state["blockers"] = blockers
+        state["quote_state_gap_seconds"] = None
+        return state
+    gap = abs((quote_time - state_time).total_seconds())
+    state["quote_state_gap_seconds"] = round(gap, 3)
+    if gap > MAX_QUOTE_STATE_SKEW_SECONDS:
+        state["usable"] = False
+        blockers.append("quote_state_not_synchronized")
+    state["blockers"] = blockers
+    return state
 
 
 def RejectUnverifiedAggregate(quote: dict) -> dict:

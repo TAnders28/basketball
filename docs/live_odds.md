@@ -29,7 +29,8 @@ quote time, freshness is `unknown`.
 | Polymarket CLOB | Bid, ask, size, and the order-book snapshot `timestamp` | https://docs.polymarket.com/api-reference/market-data/get-order-book |
 | Polymarket CLOB fee | `base_fee` in basis points for each token | https://docs.polymarket.com/api-reference/market-data/get-fee-rate and https://docs.polymarket.com/trading/fees |
 | Kalshi | Public `series_ticker=KXNBAGAME` markets and order books | https://docs.kalshi.com/getting_started/quick_start_market_data and https://docs.kalshi.com/api-reference/market/get-market-orderbook |
-| NBA scoreboard | Game id, period, clock, and score only. Not a price. Same URL as `nba_api.live.nba.endpoints.scoreboard` | `https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json` |
+| NBA scoreboard | Which game is which. `meta.time` has no offset and is not an as-of. Same URL as `nba_api.live.nba.endpoints.scoreboard` | `https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json` |
+| NBA play-by-play | Score as-of from action `timeActual` when that timestamp has an offset. Same family as `nba_api.live.nba.endpoints.playbyplay` | `https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{gameId}.json` |
 
 Each kept Polymarket contract records:
 
@@ -71,27 +72,34 @@ outage. The client is GET-only and allow-lists the four hosts above.
 
 ## Fees and settlement
 
-`sourced` means Gamma `feeSchedule.rate` and every token's CLOB `base_fee` are the
-same rate. Anything else is `unknown` or `sources_disagree`. A sourced zero is
-stored only when both say zero. Zero is never filled in for a missing field.
-Fee-adjusted prices are not computed. A fee is a trading cost, not a win probability.
+Polymarket documents two different fee objects, and this report does not turn them into one rate.
 
-Overtime is true only when the contract text says the result includes overtime,
-and false only when it says overtime is excluded. Silence is `unknown`. During
-overtime, unknown or excluded settlement blocks the executable flag. Polymarket
-per-share payout is left `unknown` unless that market payload states it. Kalshi
-`notional_value_dollars` is copied through when the payload has it. Kalshi fees
-are `unknown` because the market payload used here has no fee field.
+- The 31 Mar 2026 changelog says fees are calculated from the market `feeSchedule` ([changelog](https://docs.polymarket.com/changelog/predictions)). `feeSchedule.rate` is the base rate in that calculation, `exponent` is the price-curve exponent, and `takerOnly` means only the taker pays ([market details](https://docs.polymarket.com/market-data/market-details)). The published formula is `fee = C × feeRate × p × (1 - p)` ([fees](https://docs.polymarket.com/trading/fees)). The sports category row there is taker `0.05`, maker `0`, rebate 15%.
+- `GET /fee-rate` documents `base_fee` as basis points ([fee rate](https://docs.polymarket.com/api-reference/market-data/get-fee-rate)). `GET /clob-markets/{condition_id}` documents both `fd` (rate, exponent, taker-only) and `mbf` / `tbf` as maker and taker base fees in basis points ([CLOB market info](https://docs.polymarket.com/api-reference/markets/get-clob-market-info)).
+
+No page read for this change says `base_fee` equals `feeSchedule.rate × 10000`. That conversion is not applied. When both a schedule rate and a basis-point fee are present, status is `unreconciled`, `single_fee_rate` is null, and no fee-adjusted price is computed. `explicit_zero` is used only when every present schedule rate and basis-point field is explicitly 0. A missing field is not filled with 0.
+
+After resolution, a winning outcome token redeems for 1 pUSD and a losing token for 0 ([resolution](https://docs.polymarket.com/concepts/resolution), [Polymarket 101](https://docs.polymarket.com/polymarket-101)). That redemption does not decide overtime. Overtime is true only when the contract text says the result includes overtime, and false only when it says overtime is excluded. Silence is `unknown`. During overtime, unknown or excluded settlement blocks the executable flag.
+
+Kalshi `GET /series/KXNBAGAME` supplies `fee_type` and `fee_multiplier` ([get series](https://docs.kalshi.com/api-reference/market/get-series)). The dollar formula lives in the fee PDF and is not applied here. The series contract PDF is not parsed, so it does not decide overtime. Market `notional_value_dollars` is copied when present. `updated_time` remains non-trading metadata, not a quote time.
 
 ## Game state
 
-The scoreboard `meta.time` string has no offset. It stays `freshness: unknown`
-and `timezone_resolution: naive_no_offset`. It is not interpreted as UTC or
-Eastern, including when a 12-hour shift would land near the observation. An
-explicit offset is the only clock that can be fresh. Without that, scores may
-be shown from the payload but `usable` is false, and the reporting tier cannot
-be `executable_quote`. The Polymarket event `score` string does not name which
-team has which total, so it is not the game-state source.
+The scoreboard `meta.time` string has no offset. It stays unused. It is not
+interpreted as UTC or Eastern, including when a 12-hour shift would land near
+the observation. Box-score tip fields such as `gameTimeUTC` are the scheduled
+start, not the score as-of.
+
+When play-by-play is read, the as-of is the latest action `timeActual` that
+parses with an explicit offset (`nba_api.live.nba.endpoints.playbyplay`). The
+score on that same action is the score. A naive `timeActual` is skipped. The
+quote snapshot and that play must be within 30 seconds, and the play must be
+fresh against the observation (45 seconds). Those windows are this report's
+fail-closed limits, not an NBA service level. If they are missed, the book can
+still be executable and the tier stays `executable_unaligned`.
+
+The Polymarket event `score` string does not name which team has which total,
+so it is not the game-state source.
 
 ## Tiers
 
@@ -102,8 +110,11 @@ team has which total, so it is not the game-state source.
 - `not_executable`: a mapped market whose book or contract failed a check
 - `blocked`: outage, or no usable mapping
 
-`assessment_tier` is `unavailable` on every report. There is no validated in-play
-model in this repository. Pregame Elo from `Backtest.PredictDay` is labeled
-`pregame_only` when someone passes it in, and `usable_as_inplay` stays false.
-`supported_edge` and `expected_value` stay null. A market bid or ask is tagged
-`market_price_not_a_model_forecast`.
+`assessment_tier` is `unavailable` on every report. `Backtest` Elo, record, and
+rest strategies are pregame only. This repository has no historical in-play
+state-and-odds validation, and a calibrated live probability is not produced
+from those backtests. `historical_state_odds_validation` is false and
+`calibrated_live_probability` is null. Pregame Elo from `Backtest.PredictDay`
+is labeled `pregame_only` when someone passes it in, and `usable_as_inplay`
+stays false. `supported_edge` and `expected_value` stay null. A market bid or
+ask is tagged `market_price_not_a_model_forecast`.

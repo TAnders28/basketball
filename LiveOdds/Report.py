@@ -16,8 +16,18 @@ from decimal import Decimal
 from LiveOdds.Sources import ClassifyKalshiMarket, ClassifyPolymarketMarket, LoadBundle
 from LiveOdds.Time import EASTERN, FormatEt, FormatUtc, ParseInstant, ResolveNaiveWallClock
 from LiveOdds.Validate import (
-    EvaluateGameState, EvaluatePolymarketBook, FeeStatus, GuardModels, OvertimeRule, Readiness,
+    EvaluateGameState, EvaluatePolymarketBook, FeeStatus, GameStateFromPlay, GuardModels,
+    LatestOffsetPlay, OvertimeRule, Readiness, SynchronizeQuoteAndState,
 )
+
+PLATFORM_REDEMPTION = {
+    "winning_token": "1 pUSD",
+    "losing_token": "0 pUSD",
+    "source": "https://docs.polymarket.com/concepts/resolution",
+    "also": "https://docs.polymarket.com/polymarket-101",
+    "decides_overtime": False,
+    "note": "Platform redemption after the winning outcome is known. It does not decide overtime.",
+}
 
 _SOURCE_NOTES = [
     {"name": "polymarket_gamma",
@@ -38,7 +48,11 @@ _SOURCE_NOTES = [
     {"name": "nba_scoreboard",
      "docs": ["https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"],
      "documented_via": "nba_api.live.nba.endpoints.scoreboard.ScoreBoard",
-     "role": "Game state only. Not a betting line. meta.time is used only when its zone can be resolved."},
+     "role": "Game identity. meta.time has no offset and is not an as-of."},
+    {"name": "nba_playbyplay",
+     "docs": ["https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{gameId}.json"],
+     "documented_via": "nba_api.live.nba.endpoints.playbyplay.PlayByPlay timeActual",
+     "role": "Score as-of only when timeActual has an explicit offset and is close to the quote."},
 ]
 
 
@@ -79,7 +93,33 @@ def _KalshiLevels(rows):
     return levels
 
 
-def BuildKalshiQuote(markets, books) -> dict:
+def _SeriesFee(series) -> dict:
+    if not series or series.get("error") or not isinstance(series.get("body"), dict):
+        return {"status": "unknown", "assumed_zero": False, "dollar_fee": None,
+                "note": "Series fee payload was not read. Zero is not assumed."}
+    row = series["body"].get("series") or {}
+    return {
+        "status": "type_sourced_formula_not_applied",
+        "fee_type": row.get("fee_type"),
+        "fee_multiplier": row.get("fee_multiplier"),
+        "contract_terms_url": row.get("contract_terms_url"),
+        "contract_url": row.get("contract_url"),
+        "settlement_sources": row.get("settlement_sources"),
+        "dollar_fee": None,
+        "assumed_zero": False,
+        "overtime_from_contract_pdf": None,
+        "note": (
+            "fee_type and fee_multiplier are from GET /series/{ticker}. "
+            "The fee schedule PDF is not applied as a computed charge. "
+            "The contract PDF was not parsed, so it does not decide overtime."),
+        "docs": [
+            "https://docs.kalshi.com/api-reference/market/get-series",
+            "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
+        ],
+    }
+
+
+def BuildKalshiQuote(markets, books, series=None) -> dict:
     """Indicative only. The documented order book has no snapshot timestamp."""
     contracts = []
     for market in markets:
@@ -136,8 +176,9 @@ def BuildKalshiQuote(markets, books) -> dict:
         "freshness": "unknown",
         "reason": "Get Market Orderbook has no snapshot timestamp. Retrieval time is not used as the quote time.",
         "fees": {"status": "unknown", "assumed_zero": False, "fee_adjusted_probability": None,
-                 "note": "No fee field on the public market payload. Zero is not assumed.",
+                 "note": "No fee field on the market payload. Zero is not assumed.",
                  "docs": "https://docs.kalshi.com/api-reference/market/get-markets"},
+        "series_fee": _SeriesFee(series),
         "settlement": settlement,
         "contracts": contracts,
         "event_ticker": markets[0].get("event_ticker") if markets else None,
@@ -162,6 +203,24 @@ def _GroupKalshi(raw_markets, game_date):
             continue
         ready[frozenset(pair)] = rows
     return ready, ambiguous, rejected
+
+
+def _GameState(bundle, state_game, resolved_time, board_observed, board_date, game_date):
+    """Prefer a play-by-play timeActual with an offset. Never guess meta.time."""
+    plays = bundle.get("play_by_play")
+    game_id = str((state_game or {}).get("gameId") or "")
+    if isinstance(plays, dict) and game_id in plays:
+        wrapped = plays[game_id] or {}
+        play = LatestOffsetPlay(wrapped.get("body")) if not wrapped.get("error") else None
+        if play is not None:
+            return GameStateFromPlay(play, wrapped.get("observed_at"), state_game, board_date, game_date)
+        missing = _EmptyState("play_timestamp_missing_or_naive", wrapped.get("observed_at") or board_observed)
+        missing["source"] = "nba_cdn_playbyplay"
+        missing["source_url"] = wrapped.get("url")
+        missing["scoreboard_meta_time_not_used"] = True
+        missing["note"] = "No offset-aware play timestamp. Scoreboard meta.time was not used."
+        return missing
+    return EvaluateGameState(state_game, resolved_time, board_observed, board_date, game_date)
 
 
 def _EmptyState(reason, observed_at):
@@ -223,14 +282,15 @@ def BuildReport(bundle: dict) -> dict:
             game_state = _EmptyState("scoreboard_date_mismatch", board_observed)
         elif pair in index:
             state_game = index[pair]
-            game_state = EvaluateGameState(state_game, resolved_time, board_observed, board_date, game_date)
+            game_state = _GameState(bundle, state_game, resolved_time, board_observed, board_date, game_date)
         elif (market["home"], market["away"]) in index:
             game_state = _EmptyState("home_away_mismatch", board_observed)
         else:
             game_state = _EmptyState("team_not_on_scoreboard", board_observed)
         settlement = OvertimeRule(market.get("description"))
         settlement["resolution_source"] = market.get("resolution_source")
-        settlement["per_share_payout"] = "unknown"
+        settlement["per_share_payout"] = "1 pUSD if that outcome wins the resolution; 0 if it loses"
+        settlement["platform_redemption"] = PLATFORM_REDEMPTION
         evaluated = dict(market)
         evaluated["includes_overtime"] = settlement["includes_overtime"]
         raw_phase = game_state.get("phase") or "unknown"
@@ -242,6 +302,7 @@ def BuildReport(bundle: dict) -> dict:
             # An unresolved game clock must not open the looser pregame age window.
             quote_phase = "unknown"
         quote = EvaluatePolymarketBook(evaluated, bundle.get("books") or {}, quote_phase)
+        game_state = SynchronizeQuoteAndState(game_state, quote.get("quote_timestamp_utc"))
         fee_payloads = {}
         for token_id in market["token_ids"]:
             body = ((bundle.get("fees") or {}).get(token_id) or {}).get("body")
@@ -249,7 +310,7 @@ def BuildReport(bundle: dict) -> dict:
                 fee_payloads[token_id] = body
         fees = FeeStatus(market, fee_payloads, market["token_ids"])
         kalshi_rows = kalshi_ready.get(frozenset(pair))
-        kalshi = BuildKalshiQuote(kalshi_rows, bundle.get("kalshi_books")) if kalshi_rows else None
+        kalshi = BuildKalshiQuote(kalshi_rows, bundle.get("kalshi_books"), bundle.get("kalshi_series")) if kalshi_rows else None
         if kalshi is None and not bundle.get("kalshi_error"):
             kalshi = {"venue": "kalshi", "executable": False, "freshness": "unknown",
                       "reason": "no_matching_open_contract", "contracts": []}
