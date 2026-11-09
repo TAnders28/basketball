@@ -1,4 +1,4 @@
-# Byte-compiled / cache
+﻿# Byte-compiled / cache
 __pycache__/
 *.py[cod]
 *.pyo
@@ -30,3 +30,6 @@ Thumbs.db
 # Hand-picked example outputs for reading (small, tracked)
 !/examples/
 !/examples/*.json
+
+# Parquet artifacts
+*.parquet
