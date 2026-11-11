@@ -21,8 +21,7 @@ NBA statistic retrieval and strategy backtesting. Same layout as `football` / `b
 
 ## Setup
 
-    python -m venv .venv
-    .venv\Scripts\python.exe -m pip install -r requirements.txt
+    powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 
 ## Pull stats
 
