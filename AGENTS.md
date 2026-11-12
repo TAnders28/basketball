@@ -25,6 +25,9 @@ Shared conventions for agents working in this repo. Keep changes small and local
 .venv\Scripts\python.exe -m Matchups.PullData --seasons 2026 2025 2024 2023 --prior-seasons 2022   # resumable, polite
 .venv\Scripts\python.exe -m Matchups.RunAll --workers 10    # research grid + sim; caps at floor(cores/2), BelowNormal
 .venv\Scripts\python.exe -m Matchups.Report --out-dir <AgentDocs folder>
+.venv\Scripts\python.exe -m Matchups.PullData2 --season-level 2026 2025 --games 2026   # V2 data layer (rotation, PBP, synergy, tracking, shots); resumable
+.venv\Scripts\python.exe -m Matchups.V2.Run --list                                     # V2 Bayesian approaches (17, pluggable)
+.venv\Scripts\python.exe -m Matchups.V2.Run --approach all --seasons 2026 --max-days 4  # smoke; full backtests need Tim's OK
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
