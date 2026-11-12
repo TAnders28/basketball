@@ -13,7 +13,7 @@ import pickle
 import numpy as np
 
 from Matchups.V3 import Trials
-from Matchups.V3.Backtest import FORWARD_FROM, SENS, SPLIT, LoadRows
+from Matchups.V3.Backtest import FORWARD_FROM, ROOT, SENS, SPLIT, LoadRows
 from Matchups.V3.Evaluate import LossVectors, PairedBootstrap, Score
 from Matchups.V3.Overfit import PboCscv, SelectionAdjusted
 
@@ -48,7 +48,7 @@ def Compare(rows, base_rows):
 def Write(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     runs = LoadRows()
-    post = pickle.load(open(os.path.join("logs", "v3", "post.pkl"), "rb"))
+    post = pickle.load(open(os.path.join(ROOT, "post.pkl"), "rb"))
     trials = dict(runs)
     trials.update(post["post"])
     elo, kal = trials["elo_phase1"]["rows"], trials["kalman_team"]["rows"]

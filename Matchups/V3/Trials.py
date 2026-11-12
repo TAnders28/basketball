@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime
 
-PATH = os.path.join("logs", "v3", "trials.jsonl")
+PATH = os.path.join(os.environ.get("V3_ROOT", os.path.join("logs", "v3")), "trials.jsonl")
 
 
 def Hash(name, params):

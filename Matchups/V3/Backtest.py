@@ -25,12 +25,14 @@ Cpu.LimitThreads()          # before numpy loads: 1 BLAS thread here and in ever
 
 import numpy as np  # noqa: E402
 
-SEASONS = [2024, 2025, 2026]
-RECORD_FROM = "2024-11-15"
+ROOT = os.environ.get("V3_ROOT", os.path.join("logs", "v3"))
+SMOKE = os.environ.get("V3_SMOKE") == "1"       # pipeline check only: 2 seasons, 4 approaches, separate ROOT
+SEASONS = [2025, 2026] if SMOKE else [2024, 2025, 2026]
+RECORD_FROM = "2025-11-15" if SMOKE else "2024-11-15"
 SPLIT = ("2025-10-01", "2026-06-30")
 FORWARD_FROM = "2026-10-20"
-ROWS = os.path.join("logs", "v3", "rows")
-LOG = os.path.join("logs", "v3", "backtest.log")
+ROWS = os.path.join(ROOT, "rows")
+LOG = os.path.join(ROOT, "backtest.log")
 KEEP = ("game_id", "game_date", "season", "home", "away", "margin", "home_win", "margin_mean", "margin_var", "p_home",
         "term_dropped", "tau_scale", "tau_pair_hat", "home_scenarios", "away_scenarios")
 SKIP = {"coach_profile"}           # minutes model: no margin distribution of its own (feeds lineup_vs_lineup)
@@ -98,6 +100,9 @@ def RunPool(jobs, workers):
 def BaseJobs():
     import Matchups.V2.Approaches  # noqa: F401
     from Matchups.V2.Base import REGISTRY
+    if SMOKE:
+        return [("kalman_team", {}, False), ("player_kalman_scen", {}, False), ("schedule_fatigue", {}, False),
+                ("rapm_spm", {}, False), ("player_kalman", {}, True)]
     jobs = [(n, {}, False) for n in sorted(REGISTRY) if n not in SKIP]
     jobs += [(n, {}, True) for n in ORACLE]
     return jobs
@@ -155,7 +160,7 @@ def Post():
         info[label] = {"members": names, "w_global": [round(float(x), 4) for x in wg],
                        "w_context": {c: [round(float(x), 4) for x in w] for c, w in wc.items()}}
         Log(f"{label}: {time.time() - t0:.0f}s")
-    with open(os.path.join("logs", "v3", "post.pkl"), "wb") as fh:
+    with open(os.path.join(ROOT, "post.pkl"), "wb") as fh:
         pickle.dump({"post": post, "stack_info": info, "contexts": ctx}, fh)
 
 
