@@ -14,7 +14,7 @@ from itertools import combinations
 
 import numpy as np
 
-from Matchups.V2.Approaches.Common import Index
+from Matchups.V2.Approaches.Common import Index, LearnPriorScale
 from Matchups.V2.Approaches.StintRapm import POSS_VAR_PER100, StintRapm
 from Matchups.V2.Base import MARGIN_NOISE_VAR, Approach, Register
 from Matchups.V2.Bayes import BayesLinear
@@ -37,6 +37,8 @@ class PairSynergy(Approach):
         self.reg = BayesLinear(2 * capacity, tau_pair ** 2, sigma2=POSS_VAR_PER100)
         self.min_shared, self.refit_every, self.days = min_shared, refit_every, 999
         self.tau_hat = None
+        self.tau_pair, self.dropped, self.drop_tau = tau_pair, False, params.get("drop_tau", 0.1)
+        self.v0_base = np.full(2 * capacity, tau_pair ** 2)
 
     def BeforeDay(self, day, gap):
         self.base.BeforeDay(day, gap)
@@ -46,7 +48,10 @@ class PairSynergy(Approach):
             n = 2 * len(self.pairs)
             self.reg.Fit(active=max(n, 1))
             if n > 10:
-                self.tau_hat = float(np.sqrt(max(np.var(self.reg.mean[:n]), 1e-9)))
+                # learned pair-effect variance (evidence fixed point); drop the family if it collapses
+                s = LearnPriorScale(self.reg, self.v0_base, dims=n)
+                self.tau_hat = float(np.sqrt(s) * self.tau_pair)
+                self.dropped = self.tau_hat < self.drop_tau
             self.days = 0
 
     def PairCols(self, five, side, create):
@@ -77,13 +82,14 @@ class PairSynergy(Approach):
                 if i is not None:
                     idx[2 * i + 1] = idx.get(2 * i + 1, 0.0) + sign * (dfn[a][0] / 48) * (dfn[b][0] / 48)
         syn_mean = syn_var = 0.0
-        if idx:
+        if idx and not self.dropped:
             ii = np.array(list(idx))
             vv = np.array([idx[i] for i in ii])
             syn_mean = float(vv @ self.reg.mean[ii]) * pace_m / 100
             syn_var = float(vv @ self.reg.cov[np.ix_(ii, ii)] @ vv) * (pace_m / 100) ** 2
         return self.Output(mean + syn_mean, var + syn_var + MARGIN_NOISE_VAR, synergy=syn_mean,
-                           n_pairs=len(idx), tau_pair_hat=self.tau_hat or float("nan"))
+                           n_pairs=len(idx), tau_pair_hat=self.tau_hat or float("nan"),
+                           term_dropped=int(self.dropped))
 
     def Update(self, rec):
         for idx, vals, y, w, off5, def5, _sign in self.base.StintRows(rec):

@@ -109,6 +109,30 @@ class KalmanCore:
         self.mu += 0.01 * (0.5 * (game["home_score"] + game["away_score"]) - self.mu)
 
 
+def LearnPriorScale(reg, v0_base, iterations=5, lo=1e-3, hi=4.0, dims=None):
+    """
+    Evidence (type-II ML) fixed point for a shared prior-variance scale s with prior var = s * v0_base:
+      gamma = sum_i (1 - Sigma_ii / (s v0_i))   (effective number of well-determined parameters)
+      s     = sum_i (m_i - m0_i)^2 / v0_i / gamma
+    (MacKay 1992). Refits the posterior at each step. Returns s, clipped to [lo, hi].
+    """
+    n = len(v0_base) if dims is None else dims
+    s = float(np.mean(reg.v0[:n] / v0_base[:n]))
+    for _ in range(iterations):
+        m = reg.mean[:n] - reg.m0[:n]
+        diag = np.diag(reg.cov)[:n]
+        gamma = float(np.sum(1.0 - diag / (s * v0_base[:n])))
+        s_new = float(np.sum(m * m / v0_base[:n]) / max(gamma, 1e-6)) if gamma > 1e-6 else lo
+        s_new = min(max(s_new, lo), hi)
+        if abs(s_new - s) < 1e-4 * s:
+            break
+        s = s_new
+        reg.v0[:n] = v0_base[:n] * s
+        reg.dirty = True
+        reg.Fit(active=n if dims is not None else None)
+    return s
+
+
 class ResidualOnKalman(Approach):
     """
     Base for "adjustment" approaches: margin = Kalman margin + x'beta, with beta ~ N(0, prior_var) learned by
@@ -121,8 +145,16 @@ class ResidualOnKalman(Approach):
     def __init__(self, **params):
         super().__init__(**params)
         self.core = KalmanCore()
-        self.reg = BayesLinear(len(self.feature_names), params.get("prior_var", self.prior_var),
-                               prior_mean=getattr(self, "prior_mean", None), sigma2=MARGIN_NOISE_VAR)
+        n = len(self.feature_names)
+        pv = params.get("prior_var", self.prior_var)
+        self.v0_base = (np.full(n, float(pv)) if np.isscalar(pv) else np.asarray(pv, float).copy()) * params.get("prior_scale", 1.0)
+        self.reg = BayesLinear(n, self.v0_base.copy(), prior_mean=getattr(self, "prior_mean", None), sigma2=MARGIN_NOISE_VAR)
+        # learned prior variance (type-II ML / MacKay evidence updates on a shared scale s): prior var = s * v0.
+        # If s collapses below drop_below the whole term family is dropped (adjustment 0).
+        self.learn_tau = params.get("learn_tau", True)
+        self.min_evidence_games = params.get("min_evidence_games", 200)
+        self.drop_below = params.get("drop_below", 0.05)
+        self.tau_scale, self.dropped = 1.0, False
         self.pending = {}
         self.forget = params.get("forget", 0.999)
 
@@ -133,6 +165,9 @@ class ResidualOnKalman(Approach):
         self.core.k.Predict(gap)
         self.reg.Decay(self.forget ** gap)
         self.reg.Fit()
+        if self.learn_tau and self.reg.sw >= self.min_evidence_games:
+            self.tau_scale = LearnPriorScale(self.reg, self.v0_base)
+            self.dropped = self.tau_scale < self.drop_below
 
     def Predict(self, view):
         self.core.NewSeasonCheck(view.season)
@@ -140,8 +175,11 @@ class ResidualOnKalman(Approach):
         x = self.Features(view)
         adj, adj_v = self.reg.Predict(x)
         adj_v -= self.reg.Sigma2()     # parameter uncertainty only; noise already in base_v
+        if self.dropped:
+            adj, adj_v = 0.0, 0.0
         self.pending[view.game_id] = (x, base_m)
         return self.Output(base_m + adj, base_v + max(adj_v, 0.0), base_margin=base_m, adjustment=adj,
+                           tau_scale=self.tau_scale, term_dropped=int(self.dropped),
                            **{f"f_{n}": float(v) for n, v in zip(self.feature_names, x)})
 
     def Learn(self, rec):

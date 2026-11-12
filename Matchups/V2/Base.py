@@ -95,7 +95,8 @@ class RosterBook:
         """{player: (mean minutes, variance)} scaled so the team's expected minutes sum to 240."""
         roster = [p for p in self.team_last.get(team, []) if self.last_team.get(p) == team]
         if availability is not None:
-            roster = [p for p in roster if availability.get(p, 1.0) > 0.5] + [p for p, a in availability.items() if a > 0.5 and p not in roster]
+            # availability lists who is available: anyone not listed is out
+            roster = [p for p in roster if availability.get(p, 0.0) > 0.5] + [p for p, a in availability.items() if a > 0.5 and p not in roster]
         mins = {p: self.mean.get(p, 15.0) for p in roster}
         total = sum(mins.values())
         if total <= 0:
@@ -202,8 +203,27 @@ class GameRecord:
         return self._events
 
 
+DERIVED_VERSION = "v1"
+
+
+def DerivedPath(season, gid):
+    import os
+    return os.path.join(D.ROOT2, "derived", DERIVED_VERSION, str(season), f"{gid}.pkl")
+
+
 def RealRecords(game: dict) -> GameRecord:
+    """Decided game with its data. Uses the per-game derived cache (possessions, stints, events, matchups)
+    written by Matchups.V3.Derive when present (a dated "reanalysis" snapshot of play-by-play facts)."""
+    import os
+    import pickle
     s, gid = game["season"], game["game_id"]
+    path = DerivedPath(s, gid)
+    if os.path.exists(path):
+        with open(path, "rb") as fh:
+            c = pickle.load(fh)
+        return GameRecord(game, box=D.PlayerBox(s).get(gid, []), matchups=c["matchups"], rotation=None,
+                          pbp=[{"cached": 1}] if c["has_pbp"] else None, shots=D.ShotsByGame(s).get(gid, []),
+                          possessions=c["possessions"], stints=c["stints"], events=c["events"])
     return GameRecord(game, box=D.PlayerBox(s).get(gid, []), matchups=D.BoxMatchups(s, gid),
                       rotation=D.Rotation(s, gid), pbp=D.Pbp(s, gid), shots=D.ShotsByGame(s).get(gid, []))
 

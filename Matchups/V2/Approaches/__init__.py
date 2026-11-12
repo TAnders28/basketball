@@ -2,4 +2,5 @@
 
 from Matchups.V2.Approaches import (KalmanTeam, CoachProfile, StintRapm, PairSynergy, OnOff, LineupFeatures, PlayTypeScheme,  # noqa: F401
                                     SizeSpeed, SwitchHunt, SchemeAssignment, ScheduleFatigue, ShotQuality,
-                                    FourFactors, Clutch, TrackingPrior, LineupVsLineup, Stacker)
+                                    FourFactors, Clutch, TrackingPrior, LineupVsLineup, Stacker,
+                                    PlayerKalman, RapmSpm)
