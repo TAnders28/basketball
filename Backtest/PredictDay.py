@@ -1,14 +1,18 @@
-﻿r"""
-Pre-game picks for one day's NBA slate, using the same leak-free FeatureBook + EloModel + strategies
-as the backtest (no new model). Only completed games dated BEFORE the target day are fed in.
+r"""
+Pre-game picks for one day's NBA slate. The headline model is stack_global (the v3 global
+mixture), fitted leak-free on completed games dated strictly before the target day, with
+kalman_team and Elo (elo_predictday_v1) logged as shadows. Default action is PASS unless
+a market price is present and the fee-adjusted edge clears Tim's $0.02-per-contract estimate.
 
     .venv\Scripts\python.exe -m Backtest.PredictDay                    # today (Eastern)
     .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-04 --season 2026
+    .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-12 --dry-run --out-dir <dir>
 
-Needs data/season/games_<season>.json (and games_<season-1>.json to seed Elo) from GetSeasonGames.py.
-Schedule comes from stats.nba.com ScoreboardV2 (GameHeader + LineScore for abbreviations / tip time),
-with bounded retries and a CDN todaysScoreboard fallback when ScoreboardV2 returns empty/non-JSON.
-Writes data/backtest/predictions/picks_<date>.json and .md, and appends data/predictions/<season>.jsonl.
+Needs data/season/games_<season>.json (and games_<season-1>.json to seed Elo) from GetSeasonGames.py,
+plus the v2/v3 matchup data used by the stack members. Schedule comes from stats.nba.com ScoreboardV2
+(GameHeader + LineScore for abbreviations / tip time), with bounded retries and a CDN todaysScoreboard
+fallback when ScoreboardV2 returns empty/non-JSON. Writes data/backtest/predictions/picks_<date>.json
+and .md, and (unless --dry-run) appends data/predictions/<season>.jsonl.
 """
 
 import argparse
@@ -22,8 +26,10 @@ from zoneinfo import ZoneInfo
 from Backtest.Engine import Completed, PreGameView
 from Backtest.Features import FeatureBook
 from Backtest.Model import EloModel, SeasonFinalRatings
+from Backtest.Odds import FEE_BASIS
 from Backtest.Strategies import DefaultStrategies
 from Backtest.PredictionLog import AppendPredictionRows, MODEL_VERSION
+from Backtest import StackDay
 
 SEASON_DIR = os.path.join("data", "season")
 PRED_DIR = os.path.join("data", "backtest", "predictions")
@@ -161,10 +167,10 @@ def BuildState(season: int, game_date: str):
     return features, model, games
 
 
-def Recommend(view: dict, picks: dict) -> tuple:
-    """Elo pick is the headline (best backtest accuracy); confidence from Elo prob, nudged by agreement."""
-    side = picks["elo_pick"]
-    prob = view[f"model_{side}_prob"]
+def Recommend(view: dict, picks: dict, stack_home_prob: float) -> tuple:
+    """stack_global is the headline pick; confidence from its probability, nudged by agreement."""
+    side = "home" if stack_home_prob >= 0.5 else "away"
+    prob = stack_home_prob if side == "home" else 1.0 - stack_home_prob
     agree = [n for n in ("better_record", "rest_advantage") if picks.get(n) == side]
     against = [n for n in ("better_record", "rest_advantage") if picks.get(n) not in (None, side)]
     tier = "high" if prob >= 0.70 else "medium" if prob >= 0.60 else "low"
@@ -173,56 +179,127 @@ def Recommend(view: dict, picks: dict) -> tuple:
     return side, prob, tier, agree, against
 
 
-def Main() -> None:
+def ParseArgs(argv=None):
     parser = argparse.ArgumentParser(description="Pre-game picks for one NBA day")
     parser.add_argument("--date", default=datetime.now(EASTERN).strftime("%Y-%m-%d"))
     parser.add_argument("--season", type=int, default=None, help="season start year (default from date)")
-    args = parser.parse_args()
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Score the slate but do not append to data/predictions/<season>.jsonl")
+    parser.add_argument("--out-dir", default=None,
+                        help="Where to write picks_<date>.json and .md (default: data/backtest/predictions; "
+                             "required to write files on a dry-run, which never overwrites the default path)")
+    return parser.parse_args(argv)
+
+
+def MergeStackRow(game: dict, stack_row: dict) -> dict:
+    """Copy stack_global fields (and shadows / action) onto a PredictDay game row."""
+    keys = ("stack_global_home_prob", "kalman_team_home_prob", "elo_predictday_v1_home_prob",
+            "recommended_side", "recommended", "recommended_prob",
+            "kalman_team_pick", "kalman_team_prob", "elo_predictday_v1_pick", "elo_predictday_v1_prob",
+            "margin_mean", "margin_var", "action", "reason", "edge", "fee", "fee_basis")
+    for key in keys:
+        if key in stack_row:
+            game[key] = stack_row[key]
+    game["action_reason"] = stack_row.get("reason") or stack_row.get("action_reason")
+    game["model_version"] = MODEL_VERSION
+    return game
+
+
+def Run(args) -> dict:
     day = datetime.strptime(args.date, "%Y-%m-%d")
     season = args.season or (day.year if day.month >= 10 else day.year - 1)
 
     features, model, played = BuildState(season, args.date)
     slate = DeduplicateSlateByGameId(FetchSlate(args.date))
     strategies = DefaultStrategies()
+    stack = StackDay.PredictSlate(args.date, season, slate, progress=print)
+    by_id = {r["game_id"]: r for r in stack["rows"]}
     rows = []
     for game in slate:
         view = PreGameView(game, features, model)
         picks = {s.name: s.Decide(view) for s in strategies}
-        side, prob, tier, agree, against = Recommend(view, picks)
+        stacked = by_id[game["game_id"]]
+        side, prob, tier, agree, against = Recommend(view, picks, stacked["stack_global_home_prob"])
         line = FormatLine(game)
-        rows.append({**game, "line": line,
-                     "home_elo": round(model.Rating(game["home_team"]), 1),
-                     "away_elo": round(model.Rating(game["away_team"]), 1),
-                     "home_record": f"{features.Team(game['home_team']).wins}-{features.Team(game['home_team']).losses}",
-                     "away_record": f"{features.Team(game['away_team']).wins}-{features.Team(game['away_team']).losses}",
-                     "home_rest_days": view["home_rest_days"], "away_rest_days": view["away_rest_days"],
-                     "home_avg_margin": view["home_avg_margin"], "away_avg_margin": view["away_avg_margin"],
-                     "model_home_prob": round(view["model_home_prob"], 4),
-                     "picks": {k: (game[f"{v}_team"] if v else None) for k, v in picks.items()},
-                     "recommended": game[f"{side}_team"], "recommended_prob": round(prob, 4),
-                     "confidence": tier, "agrees": agree, "disagrees": against})
+        row = {**game, "line": line,
+               "home_elo": round(model.Rating(game["home_team"]), 1),
+               "away_elo": round(model.Rating(game["away_team"]), 1),
+               "home_record": f"{features.Team(game['home_team']).wins}-{features.Team(game['home_team']).losses}",
+               "away_record": f"{features.Team(game['away_team']).wins}-{features.Team(game['away_team']).losses}",
+               "home_rest_days": view["home_rest_days"], "away_rest_days": view["away_rest_days"],
+               "home_avg_margin": view["home_avg_margin"], "away_avg_margin": view["away_avg_margin"],
+               "model_home_prob": stacked["stack_global_home_prob"],
+               "picks": {k: (game[f"{v}_team"] if v else None) for k, v in picks.items()},
+               "confidence": tier, "agrees": agree, "disagrees": against}
+        MergeStackRow(row, stacked)
+        # Headline pick comes from the stack, not from Recommend's side alone (they match).
+        row["recommended"] = stacked["recommended"]
+        row["recommended_prob"] = stacked["recommended_prob"]
+        rows.append(row)
 
-    data_through = played[-1]["game_date"] if played else None
-    os.makedirs(PRED_DIR, exist_ok=True)
-    with open(os.path.join(PRED_DIR, f"picks_{args.date}.json"), "w", encoding="utf-8") as fh:
-        json.dump({"date": args.date, "season": season, "data_through": data_through,
-                   "games_used": len(played), "games": rows}, fh, indent=2)
-    lines = [f"# NBA picks {args.date} (data through {data_through}, {len(played)} games)", "",
-             "| Tip ET | Game | Line | Records | Rest (A/H) | always_home | better_record | rest_adv | elo_pick | Pick | Elo prob | Conf |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for r in rows:
-        p = r["picks"]
-        lines.append(f"| {r['tip_et']} | {r['away_team']} @ {r['home_team']} | {r['line']} | "
-                     f"{r['away_record']} / {r['home_record']} | "
-                     f"{r['away_rest_days']}/{r['home_rest_days']} | {p['always_home']} | {p['better_record'] or '-'} | "
-                     f"{p['rest_advantage'] or '-'} | {p['elo_pick']} | **{r['recommended']}** | "
-                     f"{r['recommended_prob'] * 100:.0f}% | {r['confidence']} |")
-    text = "\n".join(lines)
-    with open(os.path.join(PRED_DIR, f"picks_{args.date}.md"), "w", encoding="utf-8") as fh:
-        fh.write(text + "\n")
-    log_path = AppendPredictionRows(season, rows, source="PredictDay")
-    print(text)
-    print(f"appended {len(rows)} rows -> {log_path} (model_version={MODEL_VERSION})")
+    data_through = stack["data_through"] if stack["data_through"] is not None else (
+        played[-1]["game_date"] if played else None)
+    payload = {"date": args.date, "season": season, "data_through": data_through,
+               "games_used": stack["games_used"], "model_version": MODEL_VERSION,
+               "fee_basis": FEE_BASIS, "stack_members": stack["names"], "stack_weights": stack["weights"],
+               "dry_run": bool(args.dry_run), "games": rows}
+
+    write_dir = args.out_dir
+    if write_dir is None and not args.dry_run:
+        write_dir = PRED_DIR
+    if write_dir is not None:
+        os.makedirs(write_dir, exist_ok=True)
+        with open(os.path.join(write_dir, f"picks_{args.date}.json"), "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        lines = [f"# NBA picks {args.date} (stack_global; data through {data_through}, {stack['games_used']} games)",
+                 "",
+                 f"Fee basis: {FEE_BASIS} (Tim's estimate). Default action is PASS unless the fee-adjusted edge is positive.",
+                 "",
+                 "| Tip ET | Game | Line | Records | Rest (A/H) | stack | kalman | Elo | Pick | Prob | Conf | Action |",
+                 "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            lines.append(
+                f"| {r['tip_et']} | {r['away_team']} @ {r['home_team']} | {r['line']} | "
+                f"{r['away_record']} / {r['home_record']} | "
+                f"{r['away_rest_days']}/{r['home_rest_days']} | "
+                f"{r['stack_global_home_prob']:.3f} | {r['kalman_team_home_prob']:.3f} | "
+                f"{r['elo_predictday_v1_home_prob']:.3f} | **{r['recommended']}** | "
+                f"{r['recommended_prob'] * 100:.0f}% | {r['confidence']} | {r['action']} |"
+            )
+        text = "\n".join(lines)
+        with open(os.path.join(write_dir, f"picks_{args.date}.md"), "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    else:
+        lines = [f"# NBA picks {args.date} (stack_global; data through {data_through}, {stack['games_used']} games)",
+                 "",
+                 f"Fee basis: {FEE_BASIS} (Tim's estimate). Default action is PASS unless the fee-adjusted edge is positive.",
+                 "",
+                 "| Tip ET | Game | Line | stack | kalman | Elo | Pick | Prob | Action |",
+                 "|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            lines.append(
+                f"| {r['tip_et']} | {r['away_team']} @ {r['home_team']} | {r['line']} | "
+                f"{r['stack_global_home_prob']:.3f} | {r['kalman_team_home_prob']:.3f} | "
+                f"{r['elo_predictday_v1_home_prob']:.3f} | **{r['recommended']}** | "
+                f"{r['recommended_prob'] * 100:.0f}% | {r['action']} |"
+            )
+        text = "\n".join(lines)
+
+    log_path = None
+    if not args.dry_run:
+        log_path = AppendPredictionRows(season, rows, source="PredictDay")
+    payload["log_path"] = log_path
+    payload["table"] = text
+    return payload
+
+
+def Main(argv=None) -> None:
+    payload = Run(ParseArgs(argv))
+    print(payload["table"])
+    if payload.get("dry_run"):
+        print(f"dry-run: no rows appended (model_version={MODEL_VERSION})")
+    else:
+        print(f"appended {len(payload['games'])} rows -> {payload['log_path']} (model_version={MODEL_VERSION})")
 
 
 if __name__ == "__main__":

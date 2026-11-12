@@ -1,4 +1,4 @@
-﻿"""Append-only season prediction log under data/predictions/."""
+"""Append-only season prediction log under data/predictions."""
 
 import json
 import os
@@ -7,7 +7,35 @@ from zoneinfo import ZoneInfo
 
 EASTERN = ZoneInfo("America/New_York")
 PRED_LOG_DIR = os.path.join("data", "predictions")
-MODEL_VERSION = "elo_predictday_v1"
+# Primary PredictDay model. Schema v1 rows used model_version=elo_predictday_v1 and the
+# core fields only; v2 adds shadow probabilities and an action. Readers must tolerate both.
+MODEL_VERSION = "stack_global_predictday_v1"
+ELO_MODEL_VERSION = "elo_predictday_v1"
+KALMAN_MODEL_VERSION = "kalman_team"
+LOG_SCHEMA_VERSION = 2
+
+# Core fields written for every row (schema v1). Unknown extra keys are ignored by old readers.
+CORE_FIELDS = (
+    "created_at", "game_id", "start_time", "pick", "model_prob",
+    "market_price", "price_time", "source", "model_version", "game_date",
+    "home_team", "away_team",
+)
+# Schema v2 extras. Absent on old rows; new rows always include them (None if unknown).
+SCHEMA_V2_FIELDS = (
+    "log_schema",
+    "stack_global_home_prob",
+    "kalman_team_home_prob",
+    "elo_predictday_v1_home_prob",
+    "kalman_team_pick",
+    "kalman_team_prob",
+    "elo_predictday_v1_pick",
+    "elo_predictday_v1_prob",
+    "action",
+    "action_reason",
+    "edge",
+    "fee",
+    "fee_basis",
+)
 
 
 def LogPath(season: int) -> str:
@@ -33,6 +61,14 @@ def ParseStartTime(game_date: str, tip_et: str):
     return None
 
 
+def LogSchema(row: dict) -> int:
+    """Schema version of a stored or in-memory row. Old rows without log_schema are v1."""
+    value = row.get("log_schema")
+    if value is None:
+        return 1
+    return int(value)
+
+
 def AppendPredictionRows(season: int, rows: list, source: str = "PredictDay",
                          created_at: str = None) -> str:
     """Append one JSON object per game. Never rewrites prior lines. Returns log path."""
@@ -56,6 +92,19 @@ def AppendPredictionRows(season: int, rows: list, source: str = "PredictDay",
                 "game_date": game_date,
                 "home_team": row.get("home_team"),
                 "away_team": row.get("away_team"),
+                "log_schema": row.get("log_schema") or LOG_SCHEMA_VERSION,
+                "stack_global_home_prob": row.get("stack_global_home_prob"),
+                "kalman_team_home_prob": row.get("kalman_team_home_prob"),
+                "elo_predictday_v1_home_prob": row.get("elo_predictday_v1_home_prob"),
+                "kalman_team_pick": row.get("kalman_team_pick"),
+                "kalman_team_prob": row.get("kalman_team_prob"),
+                "elo_predictday_v1_pick": row.get("elo_predictday_v1_pick"),
+                "elo_predictday_v1_prob": row.get("elo_predictday_v1_prob"),
+                "action": row.get("action") or "PASS",
+                "action_reason": row.get("action_reason") or row.get("reason"),
+                "edge": row.get("edge"),
+                "fee": row.get("fee"),
+                "fee_basis": row.get("fee_basis"),
             }
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     return path

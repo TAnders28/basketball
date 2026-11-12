@@ -19,6 +19,7 @@ Shared conventions for agents working in this repo. Keep changes small and local
 .venv\Scripts\python.exe GetSeasonGames.py --season 2024
 .venv\Scripts\python.exe -m Backtest.RunBacktest --season 2024
 .venv\Scripts\python.exe -m Backtest.PredictDay --date YYYY-MM-DD
+.venv\Scripts\python.exe -m Backtest.PredictDay --date YYYY-MM-DD --dry-run --out-dir <dir>
 .venv\Scripts\python.exe -m Backtest.GradePredictions --season 2026
 .venv\Scripts\python.exe -m Backtest.AssessLive --date YYYY-MM-DD
 .venv\Scripts\python.exe -m LiveOdds.Report --date YYYY-MM-DD
@@ -37,7 +38,8 @@ Shared conventions for agents working in this repo. Keep changes small and local
 - Code and docs in git; data stays local (`/data/`, `*.json`, `*.jsonl`, `*.parquet`, `.venv/`).
 - No look-ahead: backtests walk day-by-day; picks on day D only see games from earlier days. PredictDay freezes completed games with `game_date < target`.
 - Without moneylines: report pick **accuracy** only — no invented P&L.
-- Working fee estimate for edge math: **ask + 0.02** per $1 contract (Tim's estimate; not a verified exchange fee). LiveOdds may still leave fee fields unreconciled.
+- PredictDay headline model is `stack_global` (v3 global mixture, leak-free, no EMOS). `kalman_team` and Elo (`elo_predictday_v1`) are logged as shadows on each prediction-log row (schema v2). Old schema v1 rows still parse. Default action is **PASS** unless a market price is present and the fee-adjusted edge is strictly positive.
+- Working fee estimate for edge math: **ask + 0.02** per $1 contract (Tim's estimate; not a verified exchange fee). LiveOdds may still leave fee fields unreconciled. `--dry-run` scores the slate and writes `--out-dir` if given, but never appends `data/predictions/<season>.jsonl` and never overwrites the default `picks_<date>` files.
 - Live AssessLive: with no validated in-play model, action is always **PASS** (`no live model`). Stale or misaligned quotes also **PASS**. Default freshness: quote 30s, game state 45s (CLI-overridable).
 - No cloud coding agents for this checkout unless Tim asks. **Push only when Tim explicitly says OK.** Local commits are fine when authorized.
 - Do not place orders or wagers from this repo.

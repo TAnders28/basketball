@@ -198,3 +198,63 @@ def ContextStack(member_rows, contexts, window=365, min_rows=300, refit_every=7,
                             context=contexts.get(r["game_id"], "normal")))
         hist.extend(day_rows)
     return out, names, w_glob, w_ctx
+
+def MixForecast(member_out, names, w):
+    """Combine member margin forecasts with mixture weights (same math as ContextStack)."""
+    mus = np.array([member_out[n]["margin_mean"] for n in names], float)
+    vs = np.array([member_out[n]["margin_var"] for n in names], float)
+    w = np.asarray(w, float)
+    mean = float(w @ mus)
+    var = float(w @ (vs + mus ** 2) - mean ** 2)
+    p = float(np.sum(w * Phi(mus / np.sqrt(vs))))
+    return {"margin_mean": mean, "margin_var": var, "p_home": p,
+            "mix": (w.tolist(), mus.tolist(), vs.tolist())}
+
+
+def WeightsForDay(member_rows, day, window=365, min_rows=300, refit_every=7, alpha_c=30.0,
+                  contextual=False, contexts=None):
+    """Weights ContextStack would use on `day`, fitted only on rows dated strictly earlier.
+
+    Replicates the weekly refit schedule (including last_fit advancing even when there
+    are fewer than min_rows) so PredictDay matches the v3 stack_global path (contextual=False).
+    """
+    contexts = contexts or {}
+    names = sorted(member_rows)
+    by_game = defaultdict(dict)
+    for n in names:
+        for r in member_rows[n]:
+            if r["game_date"] < day:
+                by_game[r["game_id"]][n] = r
+    games = [g for g, d in by_game.items() if len(d) == len(names)]
+    rows = sorted((by_game[g][names[0]] for g in games), key=lambda r: (r["game_date"], r["game_id"]))
+    K = len(names)
+    w_glob, w_ctx, last_fit, hist = np.full(K, 1 / K), {}, None, []
+    for d, day_rows in _Days(rows):
+        if last_fit is None or (date.fromisoformat(d) - date.fromisoformat(last_fit)).days >= refit_every:
+            tr = Trailing(hist, d, window)
+            if len(tr) >= min_rows:
+                F = np.array([[_Dens(r["margin"], by_game[r["game_id"]][n]["margin_mean"],
+                                     by_game[r["game_id"]][n]["margin_var"])
+                               for n in names] for r in tr])
+                w_glob = EmWeights(F, np.full(K, 0.1))
+                w_ctx = {}
+                if contextual:
+                    cl = np.array([contexts.get(r["game_id"], "normal") for r in tr])
+                    for c in set(cl):
+                        w_ctx[c] = EmWeights(F[cl == c], alpha_c * w_glob)
+            last_fit = d
+        hist.extend(day_rows)
+    if last_fit is None or (date.fromisoformat(day) - date.fromisoformat(last_fit)).days >= refit_every:
+        tr = Trailing(hist, day, window)
+        if len(tr) >= min_rows:
+            F = np.array([[_Dens(r["margin"], by_game[r["game_id"]][n]["margin_mean"],
+                                 by_game[r["game_id"]][n]["margin_var"])
+                           for n in names] for r in tr])
+            w_glob = EmWeights(F, np.full(K, 0.1))
+            w_ctx = {}
+            if contextual:
+                cl = np.array([contexts.get(r["game_id"], "normal") for r in tr])
+                for c in set(cl):
+                    w_ctx[c] = EmWeights(F[cl == c], alpha_c * w_glob)
+    return names, w_glob, w_ctx
+
