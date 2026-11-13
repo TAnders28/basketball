@@ -134,7 +134,7 @@ To score: `python -m InPlay.PaperScore`. Paper only: no routine was created and 
 5. Maker fill models assume no queue position. The "through" model, which validates against real prints, is the conservative one.
 6. ESPN WP is a model, not a price, and nothing on ESPN is fillable.
 7. Forward is about 3 weeks (170 games).
-8. Rule breach disclosed: earlier in this run one shell command read a terminal log outside E:\ (C:\Users\...\terminals).
+8. Rule breach disclosed: earlier in this run one shell command read a terminal log outside E:\ (C:/Users/.../terminals).
    That has not been repeated.
 
 ## Next steps

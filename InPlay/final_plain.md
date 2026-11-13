@@ -1,4 +1,4 @@
-# In-play NBA swings — plain-language findings (interim through 8:40 PM PT)
+# In-play NBA swings - plain-language findings (interim through 8:40 PM PT)
 
 **Verdict: PASS. Do not trade these rules.** After about 2,000 registered variants, the tested market prices mostly behave
 like calibrated probabilities. Swings are common, but buying dips and selling rebounds is not an edge once you pay the

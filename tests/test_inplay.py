@@ -226,5 +226,64 @@ class TestRoundTwoThree(unittest.TestCase):
         self.assertAlmostEqual(tr[0]["entry"], g.ask[3])
         self.assertEqual(tr[0]["exit"], 1.0)
 
+class TestCiAuditAndTape(unittest.TestCase):
+    def test_exact_bound_zero_losses_does_not_collapse(self):
+        from InPlay.CiAudit import ClopperPearson
+        lo, hi = ClopperPearson(86, 86)
+        self.assertAlmostEqual(lo, 0.025 ** (1.0 / 86), places=9)
+        self.assertEqual(hi, 1.0)
+        self.assertLess(lo - 0.960, 0.0)
+
+    def test_exact_bound_large_n_is_stable(self):
+        from InPlay.CiAudit import ClopperPearson
+        lo, hi = ClopperPearson(1800, 2000)
+        self.assertTrue(0.88 < lo < 0.9 < hi < 0.92)
+
+    def test_day_cluster_bootstrap_not_trade_bootstrap(self):
+        from InPlay.CiAudit import Cluster
+        # 10 trades share one losing day; one winning trade shares another day.
+        tr = [dict(day="a", gid="1", entry=0.5, exit=0, settled=True, maker=False) for _ in range(10)]
+        tr += [dict(day="b", gid="2", entry=0.5, exit=1, settled=True, maker=False)]
+        (pt, lo, hi), nd = Cluster(tr, "day", "none")
+        self.assertEqual(nd, 2)
+        self.assertAlmostEqual(pt, -4.5 / 11)
+        self.assertAlmostEqual(lo, -0.5)
+        self.assertAlmostEqual(hi, 0.5)
+
+    def test_flow_uses_only_past_prints(self):
+        import numpy as np
+        from InPlay.FlowTape import Flow
+        tp = np.array([[90, 0.5, 100, 1], [100, 0.5, 100, -1], [101, 0.5, 10000, 1]], float)
+        total, imb = Flow(tp, 100, 30)
+        self.assertEqual(total, 200)
+        self.assertAlmostEqual(imb, 0)
+        tp[2, 3] = -1
+        self.assertEqual(Flow(tp, 100, 30), (total, imb))
+
+    def test_real_tape_fill_needs_opposite_taker(self):
+        import numpy as np
+        from InPlay.TradeTape import TapeFills
+        g = MakeGame([0.5] * 5, el=[0, 60, 120, 180, 240])
+        g.t = [0, 60, 120, 180, 240]
+        g.wp = [0.5] * 5
+        # SELL YES (taker no) through our bid at 0.495; then BUY YES at that same low price does not fill a bid.
+        tp = np.array([[65, 0.48, 100, -1], [125, 0.48, 100, 1]], float)
+        fills = TapeFills(g, tp, None, 1, 2160, "through")
+        self.assertEqual(len(fills), 1)
+        self.assertAlmostEqual(fills[0][1], 0.5 - 0.495 - Fee(0.495, "kalshi_maker"))
+
+    def test_possession_and_timeout_states_are_asof(self):
+        from InPlay.LateCells import States
+        game = dict(home_id="h", away_id="a", plays=[
+            dict(seq=1, period=4, wall="2026-11-12T02:00:00Z", type="Defensive Rebound", team="h"),
+            dict(seq=2, period=4, wall="2026-11-12T02:00:10Z", type="Full Timeout", team="a"),
+            dict(seq=3, period=4, wall="2026-11-12T02:00:20Z", type="Jump Shot", team="h", scoring=True, shoot=True),
+            dict(seq=4, period=4, wall="2026-11-12T02:00:30Z", type="Official Timeout", team="a")])
+        ts, st, h, a = States(game)
+        self.assertEqual(st[0], ("h", {"h": 0, "a": 0}))
+        self.assertEqual(st[1], ("h", {"h": 0, "a": 1}))
+        self.assertEqual(st[2][0], "a")
+        self.assertEqual(st[3][1]["a"], 1)
+
 if __name__ == "__main__":
     unittest.main()
