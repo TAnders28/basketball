@@ -1,33 +1,29 @@
-r"""Compact holdout/forward table for the final summary (reads data\inplay\results\score.json; no new trials)."""
+r"""Compact holdout/forward table for the final summary, with conservative CIs from ci_audit.json (no new trials)."""
 
 import json
 import os
 import sys
 
-from InPlay.Research import RES, _Short
-
-
-def Cell(m):
-    if not m or not m.get("n_trades"):
-        return "-"
-    return f"{m['pnl_per_trade']:+.3f} [{m['lo']:+.3f}, {m['hi']:+.3f}] (n={m['n_trades']})"
+from InPlay.Research import RES
 
 
 def Table(keep):
-    d = json.load(open(os.path.join(RES, "score.json")))
-    out = ["| family | venue | exec | tag | rule | holdout P/L per trade, Kalshi fee [95% CI] | holdout P/L per trade, Tim est. | holdout P/L per game | holdout hit / max DD | forward P/L per trade, Kalshi fee [95% CI] |",
-           "|---|---|---|---|---|---|---|---|---|---|"]
-    for v in sorted(d.values(), key=lambda v: (v["family"], v["venue"], v["exec"], v["tag"])):
-        if not keep(v):
+    a = json.load(open(os.path.join(RES, "ci_audit.json")))
+    rules = {}
+    for k, v in a.items():
+        f, ven, xm, tag, rule, sp, b = k.split("|")
+        rules.setdefault((f, ven, xm, tag, rule), {})[(sp, b)] = v
+    c = lambda v: f"{v['mean']:+.3f} [{v['cons_lo']:+.3f}, {v['cons_hi']:+.3f}] (n={v['n']})" if v else "-"
+    p = lambda v: f"{v['mean']:+.3f}" if v else "-"
+    out = ["| family | venue | tag | rule | holdout, Kalshi fee [cons. 95% CI] | holdout, Tim est. | forward, Kalshi fee [cons. 95% CI] | forward, Tim est. |",
+           "|---|---|---|---|---|---|---|---|"]
+    for (f, ven, xm, tag, rule), d in sorted(rules.items()):
+        if not keep(f, ven, xm, tag):
             continue
-        h, f = v["res"].get("holdout", {}), v["res"].get("forward", {})
-        hk, ht = h.get("kalshi_taker"), h.get("tim_est_0.02")
-        if not hk or not hk.get("n_trades"):
-            continue
-        out.append(f"| {v['family']} | {v['venue']} | {v['exec']} | {v['tag'].replace('_', ' ')} | {_Short(v['params'])} | {Cell(hk)} | {ht['pnl_per_trade']:+.3f} | "
-                   f"{hk['pnl_per_game']:+.4f} | {hk['hit']:.2f} / {hk['max_dd']:.1f} | {Cell(f.get('kalshi_taker'))} |")
+        out.append(f"| {f} | {ven} | {tag.replace('_', ' ')} | {rule} | {c(d.get(('holdout', 'kalshi_taker')))} | {p(d.get(('holdout', 'tim_est_0.02')))} | "
+                   f"{c(d.get(('forward', 'kalshi_taker')))} | {p(d.get(('forward', 'tim_est_0.02')))} |")
     return "\n".join(out)
 
 
 if __name__ == "__main__":
-    print(Table(lambda v: v["exec"] == "taker" and (v["tag"] == "selected_on_tune" or v["family"] in ("dip_fav", "comeback", "late_fav"))))
+    print(Table(lambda f, ven, xm, tag: xm == "taker" and (tag == "selected_on_tune" or (tag == "pre_registered" and f in ("dip_fav", "comeback", "comeback_ctrl", "late_fav")))))
