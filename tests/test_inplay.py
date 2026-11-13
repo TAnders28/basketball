@@ -331,5 +331,29 @@ class TestRoundSeven(unittest.TestCase):
         self.assertAlmostEqual(tr[0]["entry"], 0.51 + 0.005)  # ask of bar 2 + slip, not bar 1
 
 
+class TestRoundEight(unittest.TestCase):
+    def test_anchor_trade_enters_after_tip_and_exits_at_el(self):
+        from InPlay.Round8A import Trade as AnchorTrade
+        g = MakeGame([0.50, 0.52, 0.55, 0.60, 0.62], spread=0.02, el=[0.0, 360.0, 720.0, 1080.0, 1440.0])
+        t = AnchorTrade(g, 1, 720)
+        self.assertAlmostEqual(t["entry"], 0.53 + 0.005)  # bar 1 ask + slip
+        self.assertAlmostEqual(t["exit"], 0.54 - 0.005)   # first bar with el >= 720, bid - slip
+        self.assertFalse(t["settled"])
+        s = AnchorTrade(g, -1, None)
+        self.assertTrue(s["settled"])
+        self.assertEqual(s["exit"], 0.0)  # home won, we held home NO
+
+    def test_totals_median_from_ladder(self):
+        from statistics import NormalDist
+        from InPlay.Round8B import Median
+        nd = NormalDist(mu=225.0, sigma=12.0)
+        q = []
+        for k in (210.5, 220.5, 230.5, 240.5):
+            p = 1 - nd.cdf(k)
+            q.append(({"strike": k}, {"bid": p - 0.005, "ask": p + 0.005}))
+        self.assertAlmostEqual(Median(q), 225.0, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()
+

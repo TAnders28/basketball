@@ -28,7 +28,7 @@ def Main():
     md = f"""
 ---------------------------------------------------------------------------------------------------------------------------
 
-# FINAL SUMMARY (written about 9:40 PM PT, Nov 12, 2026; Round 7 added)
+# FINAL SUMMARY (written about 9:40 PM PT, Nov 12, 2026; Rounds 7 and 8 added)
 
 **Verdict: PASS.** Nothing found is a tradable edge after fees, spread and a one-minute delay. In-play NBA prices on
 Kalshi and Polymarket are close to calibrated in every context tested. Under the two fee bases, costs are about 4-6c per
@@ -171,6 +171,29 @@ games (leak-free); event = his last substitution out before 8:00 of Q4 with the 
 - Caveat: "does not return" is only known later, so even this is an upper bound. ESPN has no injury flag or team-confirmation
   time, so the under-reaction-until-confirmation question needs news timestamps.
 
+## Round 8 (9:09 PM steer; registered before scoring)
+**8A. Our pregame stack_global as the anchor (no-shift data).** Leak-free stack_global probabilities for 2,444 games from
+Nov 15, 2024 (`InPlay.StackWalk`: one chronological walk, each member predicts before the result, stack weights refit weekly
+on earlier games only; same members and math as PredictDay). Matched to 2,404 Polymarket and 1,378 Kalshi in-play games.
+- Our model disagrees with the market's pregame price by 3c or more in about 75% of games (median 7-9c), but the market is
+  the better forecaster: holdout log loss market 0.563 vs model 0.594 (Polymarket), 0.568 vs 0.595 (Kalshi); forward 0.540 vs 0.578.
+- First-half drift toward our view (|d| >= 3c), signed so positive = toward the model: Polymarket tune +0.06c [-1.3, +1.5],
+  holdout -1.1c [-2.3, +0.2], forward -2.5c [-6.2, +1.4]; Kalshi holdout -0.8c [-2.1, +0.6], forward -2.2c [-5.8, +1.6].
+  No drift toward our pregame view; if anything the price moves away from it.
+- Final outcome vs the market pregame price on the side we prefer: Kalshi holdout -3.1c [-5.7, -0.4]. Where we disagree,
+  the market is closer.
+- Trade (selected on Polymarket tune: gap 5c, hold to settle): holdout -5.1c (Polymarket) / -5.4c (Kalshi) with Kalshi's fee,
+  CIs [-8.4, -1.6] / [-8.7, -2.0]; forward -12.2c / -13.3c (72 / 80 trades). With $0.02: -5.7c / -6.1c holdout. Every
+  first-quarter and halftime exit variant also lost on tune (-3.7 to -4.3c).
+
+**8B. Kalshi live totals vs a simple pace projection (KXNBATOTAL, 1,422 strike markets, 168 forward-window games).**
+- The market median total beats the pace projection at every checkpoint: mean absolute error 12.7 vs 13.9 points (end of Q1),
+  10.9 vs 12.3 (Q2), 7.7 vs 8.1 (Q3).
+- Does the pace-minus-market gap predict the final-minus-market miss? Slope -0.08 [-0.47, +0.34] (Q1), -0.10 [-0.47, +0.27] (Q2),
+  +0.27 [-0.15, +0.71] (Q3). All CIs include 0: the market already prices pace.
+- Trade toward pace (selected on early forward games: gap 3 points at halftime), later forward games: -15.0c [-28.0, -0.8] per
+  trade with Kalshi's fee (54 trades), -15.3c with $0.02. No 2025-26 holdout (historical endpoint not pulled).
+
 ## Trial registry and multiple testing
 - {len(ids)} unique trial ids (variant x venue x execution) in `_trials.jsonl`, across {len(fams)} families/descriptive stages.
 - PBO (CSCV, 16 blocks): Kalshi taker 0.15, Kalshi maker 0.49, Polymarket taker 0.39, order flow 0.02. PBO is uninformative
@@ -204,7 +227,8 @@ games (leak-free); event = his last substitution out before 8:00 of Q4 with the 
 2. Optional: a live side-by-side capture (Polymarket CLOB websocket vs Kalshi, a few games, paper only) would confirm the
    one-minute Polymarket feed lag directly. Use the no-shift data meanwhile.
 5. Star-exit idea: needs injury news timestamps (team PR / beat-writer posts) to test under-reaction until confirmation.
-3. Use the PredictDay stack as the pregame anchor instead of the venue's own pregame price. That is the one input not yet tested.
+3. Done in Round 8A: the PredictDay stack as anchor loses; the market's pregame price is the better forecaster. Improve the
+   pregame model before reusing it as an in-play anchor.
 4. Paid book or odds data, or any live execution, would need Tim's call. Not recommended given these results.
 
 Code: branch `feature/inplay-swings`, HEAD {head} (local commits only, not pushed).

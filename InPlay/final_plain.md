@@ -1,4 +1,4 @@
-# In-play NBA swings - plain-language findings (final, Nov 12, 2026, about 9:40 PM PT; Round 7 added)
+# In-play NBA swings - plain-language findings (final, Nov 12, 2026, about 9:40 PM PT; Rounds 7 and 8 added)
 
 **Verdict: PASS. Do not trade any of these rules.** We registered about 3,900 trials (about 2,000 strategy variants, plus Round 7 reruns of every Polymarket rule under three timings). Each was tuned on 2024-25,
 then scored once on 2025-26 and on 2026-27 to date. The market prices behaved like nearly calibrated probabilities. In-game
@@ -50,5 +50,13 @@ holdout, under both fee scenarios (Tim's $0.02-per-side estimate, and Kalshi's p
   - Stars who leave and do not return: only 20 cases. In the holdout the price kept sliding against the team (-5.9c over 5
     minutes) but not in the forward games, and fading the team lost money. ESPN data has no injury flag or confirmation time,
     so this needs news timestamps to test properly.
+
+- **Round 8 (added 9:10-9:40 PM):**
+  - Our own pregame model (stack_global, fitted only on earlier games) as the anchor: it disagrees with the market by 3c or more
+    in most games, but the market is the better forecaster (holdout log loss 0.563 vs 0.594). The live price does not drift
+    toward our view in the first half (Kalshi holdout -0.8c, CI -2.1 to +0.6), and trading toward it lost about 5c per contract
+    on the holdout (CI -8.7 to -2.0 on Kalshi) and more in the forward games.
+  - Kalshi live totals vs a simple pace projection (168 forward games): the market's total is more accurate than pace at every
+    quarter, the pace gap does not predict the miss, and trading toward pace lost 15c per contract (CI -28 to -0.8).
 
 Detailed tables, both fee scenarios, the trial registry and caveats follow. Everything is simulated, with no real trades.
