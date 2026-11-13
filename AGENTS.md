@@ -44,6 +44,7 @@ Shared conventions for agents working in this repo. Keep changes small and local
 - Code and docs in git; data stays local (`/data/`, `*.json`, `*.jsonl`, `*.parquet`, `.venv/`).
 - No look-ahead: backtests walk day-by-day; picks on day D only see games from earlier days. PredictDay freezes completed games with `game_date < target`.
 - Without moneylines: report pick **accuracy** only — no invented P&L.
+- Bankroll / equity-curve charts: one season runs from its first game to its last (no flat offseason). Multi-season charts skip summer gaps (trading-day index with a marker at each season boundary, or cut-out offseason dates) and end at the last game of the final season. Use Backtest.BankrollPlot.
 - PredictDay headline model is `stack_global` (v3 global mixture, leak-free, no EMOS). `kalman_team` and Elo (`elo_predictday_v1`) are logged as shadows on each prediction-log row (schema v2). Old schema v1 rows still parse. Default action is **PASS** unless a market price is present and the fee-adjusted edge is strictly positive.
 - Working fee estimate for edge math: **ask + 0.02** per $1 contract (Tim's estimate; not a verified exchange fee). LiveOdds may still leave fee fields unreconciled. `--dry-run` scores the slate and writes `--out-dir` if given, but never appends `data/predictions/<season>.jsonl` and never overwrites the default `picks_<date>` files.
 - Live AssessLive: with no validated in-play model, action is always **PASS** (`no live model`). Stale or misaligned quotes also **PASS**. Default freshness: quote 30s, game state 45s (CLI-overridable).
