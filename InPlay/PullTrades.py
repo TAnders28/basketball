@@ -29,7 +29,7 @@ def Sample(ms, n_hold=200, seed=12):
     fwd = [m for m in home if m["date_et"] >= "2026-10-01"]
     hold = [m for m in home if "2025-10-01" <= m["date_et"] < "2026-07-01"]
     random.Random(seed).shuffle(hold)
-    return tune + fwd + sorted(hold[:n_hold], key=lambda m: m["date_et"])
+    return tune + fwd + hold[:n_hold]  # holdout kept in seeded random order so a partial pull is still a random sample
 
 
 def Compact(t):

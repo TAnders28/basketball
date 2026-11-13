@@ -117,7 +117,7 @@ def Main(argv=None):
     cb, ccp = Coverage()
     md += [f"Bootstrap code check: the point estimate equals the plain mean for every rule (checked below), and the resampling is correct. "
            f"The narrow forward CIs come from the method, not a bug: the forward split has only ~20 trading days and the hold-to-settle "
-           f"favourite rules have 0-8 losses (the 0.95-0.98 ones have zero), and a percentile bootstrap cannot produce resamples with more losses than were seen: with zero losses the CI collapses to the average fee-adjusted margin. "
+           f"favourite rules have 0-8 losses (the 0.95-0.98 ones have zero), and a percentile bootstrap cannot invent unobserved loss outcomes: with zero losses the CI collapses to the average fee-adjusted margin. "
            f"Coverage check (300 simulated 74-trade, 20-day samples, 94% true win rate): percentile day bootstrap covers the true P&L "
            f"{cb:.0%} of the time, exact Clopper-Pearson {ccp:.0%} (target 95%). "
            f"From here on the conservative CI is the widest of day bootstrap, game bootstrap and (hold-to-settle rules) Clopper-Pearson.", "",
