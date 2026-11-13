@@ -111,8 +111,8 @@ def Main(argv=None):
             return False
 
     done = errors = 0
-    # 4 in flight; Http still enforces the per-host minimum gap (<= 4 requests/s).
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    # 8 in flight (responses are slow); Http still enforces the per-host minimum gap (<= 4 requests/s).
+    with ThreadPoolExecutor(max_workers=8) as ex:
         for k, ok in enumerate(ex.map(One, todo)):
             done += ok
             errors += not ok

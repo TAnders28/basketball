@@ -1,4 +1,4 @@
-﻿# AGENTS.md — basketball
+# AGENTS.md — basketball
 
 Shared conventions for agents working in this repo. Keep changes small and local unless Tim says otherwise.
 
@@ -29,6 +29,12 @@ Shared conventions for agents working in this repo. Keep changes small and local
 .venv\Scripts\python.exe -m Matchups.PullData2 --season-level 2026 2025 --games 2026   # V2 data layer (rotation, PBP, synergy, tracking, shots); resumable
 .venv\Scripts\python.exe -m Matchups.V2.Run --list                                     # V2 Bayesian approaches (17, pluggable)
 .venv\Scripts\python.exe -m Matchups.V2.Run --approach all --seasons 2026 --max-days 4  # smoke; full backtests need Tim's OK
+.venv\Scripts\python.exe -m InPlay.PullKalshi            # KXNBAGAME 1-min candles (home YES), resumable, public no-auth
+.venv\Scripts\python.exe -m InPlay.PullPolymarket        # NBA game moneylines + CLOB 1-min history, resumable
+.venv\Scripts\python.exe -m InPlay.PullEspn --seasons 2027 2026 2025   # ESPN per-play WP + clock (model, not a price)
+.venv\Scripts\python.exe -m InPlay.BuildPanel --seasons 2024 2025 2026 2027 --workers 8
+.venv\Scripts\python.exe -m InPlay.Research --stage games|describe|calib|grid|score --workers 8   # grid = tune split only
+.venv\Scripts\python.exe -m InPlay.EspnLong --workers 8  # frictionless ESPN proxy, 2017-18 onward
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
 

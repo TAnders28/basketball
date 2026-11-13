@@ -67,6 +67,14 @@ class TestAlign(unittest.TestCase):
         self.assertEqual([r["wp"] for r in s], [0.6, 0.6])
         self.assertEqual(s[1]["el"], 30)
 
+    def test_scoring_run_and_timeout(self):
+        mk = lambda seq, hs, a, typ="Jump Shot": {"id": str(seq), "seq": seq, "period": 1, "clock": f"11:{59-seq:02d}",
+                                                  "hs": hs, "as": a, "wall": f"2026-01-01T00:00:{seq:02d}Z", "type": typ}
+        g = {"plays": [mk(1, 2, 0), mk(2, 4, 0), mk(3, 4, 3), mk(4, 4, 3, "Full Timeout"), mk(5, 4, 3, "Official TV Timeout")], "wp": []}
+        s = EspnStates(g)
+        self.assertEqual([r["run"] for r in s], [2, 4, -3, -3, -3])
+        self.assertEqual(s[-1]["last_to"], s[3]["t"])
+
     def test_misc(self):
         self.assertEqual(Team("UTAH"), "UTA")
         self.assertEqual(Team("GS"), "GSW")
@@ -143,6 +151,18 @@ class TestEngine(unittest.TestCase):
         self.assertAlmostEqual(tr[0]["entry"], 1 - 0.795)
         self.assertEqual(RunGame("comeback", P, MakeGame([0.5, 0.6, 0.8, 0.8, 0.55, 0.5], pre=0.70,
                                                           sd=[0, 5, 12, 12, 3, 0]), slip=0.0), [])
+
+    def test_xvenue_persistence_and_staleness(self):
+        P = dict(gap=0.03, hold=2, close_gap=True, tmax=2820, max_tr=1, persist=2)
+        g = MakeGame([0.50, 0.50, 0.50, 0.50, 0.50, 0.50])
+        g.pm, g.pmage = [0.50, 0.56, 0.56, 0.56, 0.56, 0.56], [0, 0, 0, 0, 0, 0]
+        tr = RunGame("xvenue", P, g, slip=0.0)
+        self.assertEqual(tr[0]["side"], 1)
+        g.pmage = [0, 0, 300, 300, 300, 300]  # stale Polymarket prints never trigger
+        self.assertEqual(RunGame("xvenue", P, g, slip=0.0), [])
+        g.pmage = [0] * 6
+        g.pm = [0.50, 0.56, 0.50, 0.56, 0.50, 0.50]  # one-bar blips are not persistent
+        self.assertEqual(RunGame("xvenue", P, g, slip=0.0), [])
 
     def test_maker_requires_trade_through(self):
         g = MakeGame([0.6, 0.39, 0.38, 0.37, 0.36, 0.6, 0.6])

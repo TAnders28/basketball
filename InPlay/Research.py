@@ -25,7 +25,7 @@ from InPlay.Grid import CONTROL_FAMILIES, MAKER_FAMILIES, REPRESENTATIVE, Engine
 from InPlay.Load import LoadGames, SplitOf
 from InPlay.Stats import CellBootstrap, MaxDrawdown, Pbo, RatioBootstrap, Traversals
 
-OUT_DIR = r"E:\AgentDocs\Basketbot\2026-11-12_inplay-swings"
+OUT_DIR = os.environ.get("INPLAY_OUT", r"E:\AgentDocs\Basketbot\2026-11-12_inplay-swings")
 BASE = "2026-11-12_inplay-swings"
 RES = os.path.join("data", "inplay", "results")
 BASES = ("tim_est_0.02", "kalshi_taker")
@@ -104,6 +104,25 @@ def Describe(G):
         md.append("")
         md.append(f"{venue}: mean 40/60 traversals within a single quarter: " +
                   ", ".join(f"Q{q} {np.mean(per_q[q]):.2f}" for q in (1, 2, 3, 4)))
+        md.append("")
+    # lead-lag: corr(change in venue mid at t+L, change in ESPN WP at t), tune split only
+    for venue, games in G.items():
+        tune_games = [g for g in games if SplitOf(g.season) == "tune"]
+        out = []
+        for L in (-3, -2, -1, 0, 1, 2, 3):
+            xs, ys = [], []
+            for g in tune_games:
+                for i in range(4, g.n - 4):
+                    a0, a1, b0, b1 = g.wp[i - 1], g.wp[i], g.mid[i + L - 1], g.mid[i + L]
+                    if None in (a0, a1, b0, b1):
+                        continue
+                    xs.append(a1 - a0)
+                    ys.append(b1 - b0)
+            c = float(np.corrcoef(xs, ys)[0, 1]) if len(xs) > 100 else float("nan")
+            out.append((L, c, len(xs)))
+            rows.append(dict(section="leadlag", venue=venue, split="tune", metric="corr_dmarket_t+L_dESPN_t", value=c, n=len(xs), label=f"L={L}"))
+        md.append(f"Lead-lag ({venue}, tune): corr(market change at t+L, ESPN WP change at t): " + ", ".join(f"L={L:+d}: {c:.3f}" for L, c, _ in out) +
+                  ". A peak at L>0 would mean the market lags ESPN; L<0 means it leads (or ESPN wallclock lags).")
         md.append("")
     CsvRows(rows)
     AppendMd("\n".join(md))
@@ -221,14 +240,21 @@ def Calib(G, splits=("tune", "holdout", "forward")):
         cb = CalTable(_Obs(games, p_cb), cb_labels, first_only=True)
         # points-lead version for even games
         def p_cbp(g, i):
-            if g.el[i] > 2520 or abs(g.pre - 0.5) > 0.05:
+            if g.el[i] > 2520:
                 return None
             sd = g.sd[i]
-            if 10 <= abs(sd) <= 18:
-                leader = 1 if sd > 0 else -1
-                return (-leader, "trailer|even(45-55)|lead10-18pts|before Q4 6:00")
-            return None
-        cbp = CalTable(_Obs(games, p_cbp), ["trailer|even(45-55)|lead10-18pts|before Q4 6:00"], first_only=True)
+            if not (10 <= abs(sd) <= 18):
+                return None
+            leader = 1 if sd > 0 else -1
+            close = abs(g.pre - 0.5)
+            fav = 1 if g.pre >= 0.5 else -1
+            grp = "even(45-55)" if close <= 0.05 else ("mis(60-80) leader=fav" if leader == fav else "mis(60-80) leader=dog") if 0.10 <= close <= 0.30 else None
+            if grp is None:
+                return None
+            tb = "H1" if g.el[i] <= 1440 else "Q3" if g.el[i] <= 2160 else "Q4 to 6:00"
+            return (-leader, f"trailer|{grp}|lead10-18pts|{tb}")
+        cbp_labels = [f"trailer|{grp}|lead10-18pts|{tb}" for grp in ("even(45-55)", "mis(60-80) leader=fav", "mis(60-80) leader=dog") for tb in ("H1", "Q3", "Q4 to 6:00")]
+        cbp = CalTable(_Obs(games, p_cbp), cbp_labels, first_only=True)
         # 5) late favorite-longshot: current favorite in last 6 minutes of regulation, by price
         def p_late(g, i):
             if g.el[i] < 2520 or g.el[i] > 2880:
@@ -270,11 +296,10 @@ def Calib(G, splits=("tune", "holdout", "forward")):
 def _Init():
     global _G
     _G = LoadGames()
-    try:
-        import psutil
-        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
-    except Exception:
-        pass
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)  # BELOW_NORMAL
+
 
 
 def _Run(job):
@@ -347,7 +372,14 @@ def Grid(workers):
             tid = TrialId(fam, P, venue, xm)
             days = dsp.get("tune", [])
             ms = {b: Metrics(trades, gsp.get("tune", 0), days, b) for b in BASES}
-            tune[tid] = dict(family=fam, params=P, venue=venue, exec=xm, tune=ms)
+            season_ms = {}
+            for season in (2024, 2025):
+                st = [t for t in trades if t["season"] == season]
+                ng = sum(1 for g in _G[venue] if g.season == season) if _G is not None else 0
+                # Worker returns trades; for ranking, P&L per traded contract by season (minimum N check later).
+                ps = [TradePnl(t, "kalshi_taker") for t in st]
+                season_ms[str(season)] = {"n_trades": len(ps), "pnl_per_trade": float(np.mean(ps)) if ps else None}
+            tune[tid] = dict(family=fam, params=P, venue=venue, exec=xm, tune=ms, season_tune=season_ms)
             trial_rows.append(dict(trial_id=tid, created_at=Now(), family=fam, params=P, venue=venue, exec=xm,
                                    control=fam in CONTROL_FAMILIES, split_scored="tune", tune=ms))
             day_mats[(venue, xm)].append((tid, DayPnl(trades, days, "kalshi_taker")))
@@ -359,6 +391,14 @@ def Grid(workers):
         lst = [(t, d) for t, d in lst if tune[t]["family"] not in CONTROL_FAMILIES]
         mat = np.column_stack([d for _, d in lst]) if lst else np.zeros((0, 0))
         pbo["|".join(key)] = dict(zip(("pbo", "n_combos"), Pbo(mat))) | {"n_variants": len(lst), "n_days": int(mat.shape[0]) if mat.size else 0}
+    for key, lst in day_mats.items():
+        fams = defaultdict(list)
+        for t, d in lst:
+            fams[tune[t]["family"]].append(d)
+        for fam, ds in fams.items():
+            if len(ds) >= 4 and fam not in CONTROL_FAMILIES:
+                val, nc = Pbo(np.column_stack(ds))
+                pbo["|".join(key) + "|" + fam] = {"pbo": val, "n_combos": nc, "n_variants": len(ds)}
     SaveRes("grid_tune", dict(tune=tune, pbo=pbo))
     return tune, pbo
 
@@ -377,12 +417,17 @@ def Select(tune, min_trades=30):
         if fam in CONTROL_FAMILIES:
             continue
         scores = []
+        kalshi_only = fam == "xvenue" or xm == "maker"
         for venue, (tid, m) in venues.items():
             need = min_trades // 3 if venue == "kalshi" else min_trades
             if m["n_trades"] < need:
+                if venue == "kalshi" and not kalshi_only:
+                    continue  # Kalshi tune is only the 2025 playoffs; rank on Polymarket when it is too thin
                 scores = None
                 break
-            scores.append(m["pnl_per_trade"])
+            eligible = [sm["pnl_per_trade"] for sm in tune[tid].get("season_tune", {}).values()
+                        if sm["n_trades"] >= need and sm["pnl_per_trade"] is not None]
+            scores.append(min(eligible) if eligible else m["pnl_per_trade"])
         if not scores:
             continue
         s = min(scores)
@@ -435,13 +480,40 @@ def Score(workers, tune, best):
     SaveRes("score", out)
     CsvRows(rows)
     AppendTrials(trial_rows)
+    AppendMd(ScoreMd(out))
     return out
+
+
+def _Short(P):
+    return ", ".join(f"{k}={v}" for k, v in P.items() if v is not None)
+
+
+def ScoreMd(out):
+    md = ["## Backtest: tune-selected and pre-registered rules, scored once on holdout and forward", "",
+          "1 contract per trade. P&L in $ per $1 contract. CI = 95% day-clustered bootstrap. DD = max drawdown over the split, in $.", ""]
+    for basis in BASES:
+        label = " (Tim working estimate)" if basis == "tim_est_0.02" else " (Kalshi published formula)"
+        md += [f"### Fee basis {basis}{label}", "",
+               "| family | exec | venue | tag | rule | split | trades | games | P/L per trade [95% CI] | P/L per game | hit | DD |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for tid, r in sorted(out.items(), key=lambda kv: (kv[1]["family"], kv[1]["exec"], kv[1]["venue"])):
+            for sp in ("tune", "holdout", "forward"):
+                m = r["res"][sp][basis]
+                if m["n_trades"] == 0 and sp != "holdout":
+                    continue
+                ci = f"{m['pnl_per_trade']:+.4f} [{m['lo']:+.4f}, {m['hi']:+.4f}]" if m["n_trades"] else "n/a"
+                hit = f"{m['hit']:.2f}" if m["n_trades"] else "n/a"
+                md.append(f"| {r['family']} | {r['exec']} | {r['venue']} | {r['tag']} | {_Short(r['params'])} | {sp} | {m['n_trades']} | "
+                          f"{m['n_games']} | {ci} | {m['pnl_per_game']:+.4f} | {hit} | {m['max_dd']:.2f} |")
+        md.append("")
+    return "\n".join(md)
 
 
 def Main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", required=True, choices=["games", "describe", "calib", "grid", "score"])
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--splits", nargs="+", default=["tune"])
     args = ap.parse_args(argv)
     os.makedirs(OUT_DIR, exist_ok=True)
     if args.stage == "games":
@@ -460,8 +532,7 @@ def Main(argv=None):
     if args.stage == "describe":
         Describe(G)
     elif args.stage == "calib":
-        Calib(G, ("tune",))
-        Calib(G, ("holdout", "forward"))
+        Calib(G, tuple(args.splits))
     elif args.stage == "grid":
         tune, pbo = Grid(args.workers)
         best = Select(tune)

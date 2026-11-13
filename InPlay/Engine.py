@@ -19,7 +19,7 @@ class Game:
     """Plain-list arrays for one game's in-play bars (fast scalar access)."""
 
     __slots__ = ("gid", "day", "season", "stype", "venue", "pre", "won", "t", "el", "per", "sd", "wp",
-                 "bid", "ask", "mid", "trlo", "trhi", "pm", "pmage", "n", "total", "spread")
+                 "bid", "ask", "mid", "trlo", "trhi", "pm", "pmage", "n", "total", "spread", "run", "toage")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -43,6 +43,15 @@ def _Entry(fam, P, G, i):
         return 0
     if P.get("total_max") is not None and (G.total is None or G.total > P["total_max"]):
         return 0
+    if P.get("rv_min") is not None or P.get("rv_max") is not None:
+        w = [G.mid[k] for k in range(max(0, i - 10), i + 1) if G.mid[k] is not None]
+        if len(w) < 6:
+            return 0
+        rv = sum(abs(b - a) for a, b in zip(w, w[1:])) / (len(w) - 1)
+        if P.get("rv_min") is not None and rv < P["rv_min"]:
+            return 0
+        if P.get("rv_max") is not None and rv > P["rv_max"]:
+            return 0
     if fam == "dip_fav":
         fav = 1 if pre >= 0.5 else -1
         fp = SideMid(pre, fav)
@@ -88,6 +97,22 @@ def _Entry(fam, P, G, i):
             if SideMid(m, side) <= SideMid(pre, side) - P["k"] and SideMid(m, side) >= P.get("floor", 0.1):
                 return side
         return 0
+    if fam in ("fade_score_run", "timeout_fade"):
+        if G.run is None or abs(G.run[i]) < P["run_min"]:
+            return 0
+        if fam == "timeout_fade" and (G.toage is None or G.toage[i] is None or G.toage[i] > P["to_window"]):
+            return 0
+        if not (0.10 <= m <= 0.90):
+            return 0
+        return -1 if G.run[i] > 0 else 1
+    if fam == "espn_jump":
+        j = i - P["look"]
+        if j < 0 or G.wp[i] is None or G.wp[j] is None or G.mid[j] is None:
+            return 0
+        dw, dm = G.wp[i] - G.wp[j], m - G.mid[j]
+        if abs(dw) >= P["jump"] and abs(dw) - abs(dm) >= P["laggap"] and dw * dm >= 0:
+            return 1 if dw > 0 else -1
+        return 0
     if fam == "espn_lag":
         w = G.wp[i]
         if w is None or not (0.1 <= m <= 0.9):
@@ -99,12 +124,18 @@ def _Entry(fam, P, G, i):
             return -1 if P.get("dir", 1) == 1 else 1
         return 0
     if fam == "xvenue":
+        persist = P.get("persist", 1)
+        if i < persist - 1:
+            return 0
+        for k in range(i - persist + 1, i):
+            if G.pm[k] is None or G.pmage[k] is None or G.pmage[k] > 60 or G.ask[k] is None or G.bid[k] is None:
+                return 0
         p = G.pm[i]
         if p is None or G.pmage[i] is None or G.pmage[i] > 60 or G.ask[i] is None:
             return 0
-        if p - G.ask[i] >= P["gap"]:
+        if p - G.ask[i] >= P["gap"] and all(G.pm[k] - G.ask[k] >= P["gap"] for k in range(i - persist + 1, i)):
             return 1
-        if G.bid[i] - p >= P["gap"]:
+        if G.bid[i] is not None and G.bid[i] - p >= P["gap"] and all(G.bid[k] - G.pm[k] >= P["gap"] for k in range(i - persist + 1, i)):
             return -1
         return 0
     if fam in ("comeback", "comeback_ctrl"):

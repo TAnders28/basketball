@@ -90,6 +90,8 @@ def BuildGame(game, kmeta, pmeta):
         r = {"game_id": g["game_id"], "t": t, "inplay": int(tip <= t <= end),
              "el": s["el"] if s and t >= tip else 0.0, "per": s["per"] if s and t >= tip else 0,
              "sd": (s["hs"] - s["as"]) if s and t >= tip else 0, "wp": s["wp"] if s and t >= tip else None,
+             "run": s.get("run", 0) if s and t >= tip else 0,
+             "to_age": t - s["last_to"] if s and s.get("last_to") is not None else None,
              "k_bid": None, "k_ask": None, "k_mid": None, "k_last": None, "k_vol": 0.0, "k_age": None, "k_trlo": None, "k_trhi": None,
              "pm": None, "pm_age": None}
         if c is not None:

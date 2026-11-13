@@ -99,6 +99,20 @@ def EspnStates(game):
             continue
         rows.append({"t": ts, "el": el, "per": int(p["period"]), "hs": p.get("hs") or 0, "as": p.get("as") or 0,
                      "wp": wp.get(p["id"]), "type": p.get("type"), "team": p.get("team")})
+    # Consecutive scoring run and last timeout (all known from past/current plays).
+    last_h = last_a = run = 0
+    last_to = None
+    for r in rows:
+        dh, da = max(0, r["hs"] - last_h), max(0, r["as"] - last_a)
+        if dh:
+            run = run + dh if run > 0 else dh
+        if da:
+            run = run - da if run < 0 else -da
+        kind = (r.get("type") or "").lower()
+        if "timeout" in kind and "official" not in kind:
+            last_to = r["t"]
+        r["run"], r["last_to"] = run, last_to
+        last_h, last_a = r["hs"], r["as"]
     # forward-fill wp in sequence
     last = None
     for r in rows:

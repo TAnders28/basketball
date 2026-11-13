@@ -61,13 +61,30 @@ def Variants():
                 v.append(("comeback", dict(close=0.05, tmax=tmax, **lead, **ex)))
                 for who in ("fav", "dog"):
                     v.append(("comeback_ctrl", dict(mis_lo=0.10, mis_hi=0.30, leader_is=who, tmax=tmax, **lead, **ex)))
-    # pace regime (pregame book total) on the headline dip rule
-    for tmin, tmaxx in ((230, None), (None, 224)):
+    # volatility regime on the headline dip rule: mean |1-min mid change| over the last 10 minutes
+    # (pregame book totals are missing for the whole tuning split, so pace uses in-game realized volatility).
+    for rmin, rmax in ((0.02, None), (None, 0.012)):
         for ex in (dict(tgt=0.60), dict(tgt=0.60, stop=0.30), dict()):
-            v.append(("dip_fav_pace", dict(pre_lo=0.55, pre_hi=0.65, entry=0.40, tmax=1440, total_min=tmin,
-                                           total_max=tmaxx, **ex)))
+            v.append(("dip_fav_pace", dict(pre_lo=0.55, pre_hi=0.65, entry=0.40, tmax=1440, rv_min=rmin, rv_max=rmax, **ex)))
+            v.append(("dip_fav_pace", dict(pre_lo=0.55, pre_hi=0.65, entry=0.45, tmax=2160, rv_min=rmin, rv_max=rmax, **ex)))
+    for run_min in (6, 8, 10):
+        for hold in (3, 6, 10):
+            for fam in ("fade_score_run", "timeout_fade"):
+                for tgt_d in (None, 0.10):
+                    p = dict(run_min=run_min, hold=hold, tgt_d=tgt_d, tmax=2520, max_tr=3)
+                    if fam == "timeout_fade":
+                        p["to_window"] = 90
+                    v.append((fam, p))
+    for look in (1, 2, 3):
+        for jump in (0.08, 0.15):
+            for laggap in (0.05, 0.10):
+                for hold in (2, 5):
+                    v.append(("espn_jump", dict(look=look, jump=jump, laggap=laggap, hold=hold, tmax=2820, max_tr=3)))
+    for persist in (2, 3):
+        for gap in (0.02, 0.03, 0.05):
+            for hold in (2, 5, 10):
+                v.append(("xvenue", dict(gap=gap, hold=hold, close_gap=True, tmax=2820, max_tr=3, persist=persist)))
     return v
-
 
 # Pre-registered representative rules (fixed before any holdout scoring).
 REPRESENTATIVE = [

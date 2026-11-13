@@ -43,7 +43,11 @@ def BuildGames(panel, games):
         base = dict(gid=gid, day=g["date_et"], season=int(g["season"]), stype=int(g["season_type"]),
                     won=int(won), t=df.t.tolist(), el=df.el.astype(float).tolist(), per=df.per.astype(int).tolist(),
                     sd=df.sd.astype(int).tolist(), wp=[_F(x) for x in df.wp], total=_F(g.get("book_total")),
-                    spread=_F(g.get("book_spread")))
+                    spread=_F(g.get("book_spread")), run=[int(x) for x in df.run], toage=[_F(x) for x in df.to_age])
+        # Stale book snapshots cannot be used as fillable prices.
+        stale_k = [(_F(a) is None or _F(a) > 60) for a in df.k_age]
+        for col in ("k_bid", "k_ask", "k_mid"):
+            df.loc[stale_k, col] = float("nan")
         kpre = _F(g.get("k_pre"))
         if kpre is not None and g.get("kalshi_ticker") is not None and df.k_mid.notna().sum() > 30:
             pm_vals = [(_F(p) if (a is not None and _F(a) is not None and _F(a) <= 60) else None)
