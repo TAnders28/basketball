@@ -1,4 +1,4 @@
-# In-play NBA swings - plain-language findings (final, Nov 12, 2026, about 9:35 PM PT)
+# In-play NBA swings - plain-language findings (final, Nov 12, 2026, about 9:40 PM PT; Round 7 added)
 
 **Verdict: PASS. Do not trade any of these rules.** We registered about 2,000 strategy variants. Each was tuned on 2024-25,
 then scored once on 2025-26 and on 2026-27 to date. The market prices behaved like nearly calibrated probabilities. In-game
@@ -38,12 +38,17 @@ holdout, under both fee scenarios (Tim's $0.02-per-side estimate, and Kalshi's p
 - **CI fix:** the day-clustered bootstrap was coded correctly but was overconfident when every forward trade won. Reported CIs now
   use the widest of the day bootstrap, the game bootstrap and the exact binomial. The pre-registered favourite-hold result in
   the forward test changes from looking significant (+3.8c, CI +0.4 to +6.5) to not significant (CI -2.9 to +6.4).
-- **Timing caveat:** Polymarket's stored price history is about a minute behind Kalshi. An audit against Polymarket's public
-  on-chain trades shows the history labels match the on-chain trade times (best offset 0 to -15 s). So the minute gap is in the
-  venue or its settlement, not a mislabelled history. That makes the final run's 60 s shift questionable. It can let
-  Polymarket-based rules see up to a minute into the future, which makes them look better, not worse. Still, every Polymarket
-  rule loses. Two positives should be treated as artifacts:
-  - The forward directional-maker result (+2.5c per fill; holdout -0.7c).
-  - The 11-second gap-convergence figure.
+- **Timing (resolved in Round 7):** Polymarket's history labels match its on-chain trades, and its price trails ESPN by one minute
+  in 94% of games. Rerunning every Polymarket-based rule with no shift (and with per-game offsets) leaves every rule losing. The
+  one forward positive in the study, the directional maker off the Polymarket gap (+2.5c per fill), becomes -1.2c (CI -1.7 to
+  -0.6) without the shift. It came from reading Polymarket a minute ahead.
+- **Round 7 (added 9:00-9:40 PM):**
+  - Queue position: quoting Kalshi earns +0.2c per fill on the holdout only if we are first in line. With 50-250 contracts ahead
+    of us it is zero to negative, and -1.2 to -1.4c if we only count prints through our price. Not tradable.
+  - Moneyline vs spread markets on Kalshi (170 forward games): they agree within 1.6c (median), no arbitrage after fees, and
+    neither leads the other at one-minute resolution. Trading the gap lost 3.2c per contract (CI -5.6 to -1.3).
+  - Stars who leave and do not return: only 20 cases. In the holdout the price kept sliding against the team (-5.9c over 5
+    minutes) but not in the forward games, and fading the team lost money. ESPN data has no injury flag or confirmation time,
+    so this needs news timestamps to test properly.
 
 Detailed tables, both fee scenarios, the trial registry and caveats follow. Everything is simulated, with no real trades.

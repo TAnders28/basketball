@@ -28,7 +28,7 @@ def Main():
     md = f"""
 ---------------------------------------------------------------------------------------------------------------------------
 
-# FINAL SUMMARY (written about 9:35 PM PT, Nov 12, 2026)
+# FINAL SUMMARY (written about 9:40 PM PT, Nov 12, 2026; Round 7 added)
 
 **Verdict: PASS.** Nothing found is a tradable edge after fees, spread and a one-minute delay. In-play NBA prices on
 Kalshi and Polymarket are close to calibrated in every context tested. Under the two fee bases, costs are about 4-6c per
@@ -78,8 +78,8 @@ Other families (detail sections above):
 - Bayesian calibration surface: +5c (Polymarket) / +15c (Kalshi) on tune, but -5c on holdout. A textbook overfit.
 - Order-flow imbalance (trade tape): -5.0c (holdout), -5.3c (forward).
 - espn_lag on recalibrated ESPN WP: -4.6c / -5.5c (holdout).
-- Directional maker off the Polymarket gap: -0.7c (holdout), +2.5c (forward). The forward number is likely a timestamp artifact
-  and is marked to mid (see the Round 6A caveat).
+- Directional maker off the Polymarket gap: -0.7c (holdout), +2.5c (forward) under the -60 s shift. Round 7A confirms the
+  forward number was the shift: with no shift it is -1.18c [-1.68, -0.63] forward and -1.46c [-1.96, -0.95] holdout.
 - Calm-stretch-only quoting (low recent volatility, market close to ESPN, no score change; tape-through fills): -0.84c per fill
   [-1.53, -0.15] (holdout), -1.14c [-2.06, -0.35] (forward).
 - Last-2:00 possession and timeout cells: the best tune cell ("leader has the ball, trailer has 2+ timeouts") is +1.3c
@@ -118,6 +118,59 @@ That is 2 of 72 post-hoc forward cells, with holdout contamination, so they do n
 Decision rule: an edge only if the lower bound of the conservative CI is above 0 under both fee bases after at least 300 trades.
 To score: `python -m InPlay.PaperScore`. Paper only: no routine was created and nothing was placed.
 
+## Round 7 (9:00 PM steer; every variant registered on its tune split before scoring)
+**7A. Polymarket timing redone.** Three timings, same rules, same tune selection (Kalshi taker fee): m60 (the earlier -60 s
+shift), s0 (no shift; labels on time, as the on-chain audit supports) and perg (per-game offset estimated on each game's first
+half against ESPN WP, applied to the second half only).
+- Per-game offset: Polymarket moves one minute after ESPN in 93-94% of games in every split (two minutes in 4-5%). It is a
+  stable venue/feed lag, not a per-game labelling error. Applying it (perg) means reading Polymarket one minute ahead, which is
+  a leak if the labels are on time.
+- Every Polymarket-based family stays negative on the holdout under all three timings (e.g. espn_lag on Polymarket -4.7c / -3.6c
+  / -3.7c; xvenue on Kalshi -3.1c / -5.7c / -4.6c; Kalshi fee). No holdout CI is above zero under any timing.
+- The slower-venue maker (Kalshi maker order when Polymarket disagrees by 3c+; real-print fills; marked to mid 5 min later):
+
+| timing | holdout per fill [95% CI] (fills) | forward per fill [95% CI] (fills) |
+|---|---|---|
+| m60 (-60 s shift) | -0.73c [-3.20, +2.19] (137) | +2.49c [+0.83, +4.17] (320) |
+| s0 (no shift) | -1.46c [-1.96, -0.95] (2,908) | -1.18c [-1.68, -0.63] (2,375) |
+| perg (per-game offset, gap 5c) | -0.46c [-1.62, +0.73] (421) | +0.98c [-0.25, +2.30] (465) |
+
+  The only forward positive in the whole study disappears without the shift. It came from seeing Polymarket's next minute.
+
+**7B. Queue-position fills for two-sided quoting (Kalshi tapes, maker fee, marked to mid).** Our quote joins the back of the
+queue; it fills only if prints trade through our price or the volume printed at our price exceeds the contracts ahead of us.
+Kalshi history has no depth, so the queue ahead is an assumption:
+
+| contracts ahead of us | holdout per fill [95% CI] | forward per fill [95% CI] |
+|---|---|---|
+| 0 ("touch", optimistic) | +0.19c [+0.16, +0.22] | +0.06c [+0.04, +0.08] |
+| 50 | +0.11c [+0.07, +0.13] | -0.04c [-0.08, -0.01] |
+| 250 | -0.01c [-0.05, +0.02] | -0.18c [-0.23, -0.13] |
+| 1,000 | -0.21c [-0.31, -0.12] | -0.44c [-0.57, -0.31] |
+| last 5 min printed at that price | -0.66c [-0.73, -0.59] | -0.91c [-0.95, -0.88] |
+| through only (conservative) | -1.20c [-1.33, -1.05] | -1.37c [-1.48, -1.25] |
+
+  The edge is a fraction of a cent even with no queue, and it turns negative once about 50-250 contracts sit ahead of us.
+  It also ignores the cost of getting out (it is marked to mid). Not tradable.
+
+**7C. Kalshi moneyline vs Kalshi spread ladder (KXNBASPREAD, free 1-minute candles, 170 forward-window games, 1,896 strike markets).**
+- Implied moneyline from a probit fit across strikes (P(home margin > 0.5)) vs the moneyline mid: median gap 1.6c, 90th percentile
+  4.1c, gap of 5c or more in 5.1% of in-play minutes.
+- Static arbitrage (spread YES bid above moneyline ask, or the mirror): 18 strike-minutes gross, 0 after two taker fees.
+- Lead-lag of 1-minute changes: 0.848 at lag 0, 0.003-0.018 at +/-1-2 minutes. Neither market leads the other at minute resolution.
+- Trade toward the ladder (selected on early forward games: gap 5c, hold 10 min), scored on later forward games (142 trades):
+  -3.2c [-5.6, -1.3] Kalshi fee, -4.8c with $0.02, -0.9c [-3.0, +1.0] with no fee. No holdout: those games are on Kalshi's
+  historical endpoint and were not pulled.
+
+**7D. Stars who leave and do not return (ESPN substitutions, 451 Kalshi tape games).** Star = a team's top-2 scorers in its earlier
+games (leak-free); event = his last substitution out before 8:00 of Q4 with the game priced 15-85%, not a foul-out.
+- Only 20 such exits (1 tune, 13 holdout, 6 forward), against 2,007 ordinary rest exits.
+- Holdout: the price keeps moving against the team, -5.9c over 5 minutes [-10.1, -1.6], vs -0.1c after rest exits. Forward: -0.7c
+  [-8.8, +9.7]. Too few events to separate from noise, and it did not repeat forward.
+- Fading the team 10 minutes: holdout -1.7c [-8.6, +4.7] (13), forward -5.2c [-13.2, +3.8] (6); the control (rest exits) -5.3c / -4.5c.
+- Caveat: "does not return" is only known later, so even this is an upper bound. ESPN has no injury flag or team-confirmation
+  time, so the under-reaction-until-confirmation question needs news timestamps.
+
 ## Trial registry and multiple testing
 - {len(ids)} unique trial ids (variant x venue x execution) in `_trials.jsonl`, across {len(fams)} families/descriptive stages.
 - PBO (CSCV, 16 blocks): Kalshi taker 0.15, Kalshi maker 0.49, Polymarket taker 0.39, order flow 0.02. PBO is uninformative
@@ -130,25 +183,27 @@ To score: `python -m InPlay.PaperScore`. Paper only: no routine was created and 
 1. Polymarket timestamps: the final run assumes its history labels run 60 s late. A late audit against public on-chain trades
    (section "Polymarket timestamp audit") finds that the history labels match on-chain trade times to within about 15-30 s.
    So if Polymarket looks a minute behind Kalshi, the delay is in on-chain timestamps or in the venue itself, not the label.
-   The audit cannot separate those two. Under the "venue is slower" reading, the -60 s shift lets Polymarket-based rules see up
-   to a minute ahead. Every Polymarket rule still loses, so the verdict does not change. But any Polymarket-timed or
-   cross-venue positive result (Round 6A forward) should be treated as a likely artifact.
+   Round 7A reran every Polymarket-based rule with no shift and with per-game offsets: Polymarket trails ESPN by one minute in
+   94% of games, every Polymarket rule still loses, and the Round 6A forward positive vanishes without the shift (it was a
+   one-minute look-ahead). Treat the no-shift results as the honest ones.
 2. Polymarket has no historical book. Its spread is an assumed 1c, and its fees and access were not verified; it is scored
    with the two Kalshi-style fee bases.
 3. The Kalshi tune split is only 86 playoff games, so Kalshi-only selection is noisy. Polymarket tune (1,267 games) carries
    most of the selection.
 4. Kalshi fee: the formula is applied unrounded per contract. With 1-lot orders, Kalshi's round-up makes costs slightly worse.
    Tim's $0.02 is an estimate.
-5. Maker fill models assume no queue position. The "through" model, which validates against real prints, is the conservative one.
+5. Maker fills: Kalshi history has no book depth, so queue position is an assumption. Round 7B shows any quoting edge is under
+   0.2c with no queue and negative with 50-250 contracts ahead; the "through" model is the conservative bound.
 6. ESPN WP is a model, not a price, and nothing on ESPN is fillable.
 7. Forward is about 3 weeks (170 games).
-8. Rule breach disclosed: earlier in this run one shell command read a terminal log outside E:\ (C:/Users/.../terminals).
+8. Rule breach disclosed: earlier in this run one shell command read a terminal log outside E:\\ (C:/Users/.../terminals).
    That has not been repeated.
 
 ## Next steps
 1. Paper-score the frozen spec weekly with `InPlay.PaperScore` (no tuning).
-2. Settle the Polymarket timing question with a live side-by-side capture (Polymarket CLOB websocket vs Kalshi, a few
-   games, paper only) before trusting any cross-venue or Polymarket-timing result (it is the open question behind Round 6A).
+2. Optional: a live side-by-side capture (Polymarket CLOB websocket vs Kalshi, a few games, paper only) would confirm the
+   one-minute Polymarket feed lag directly. Use the no-shift data meanwhile.
+5. Star-exit idea: needs injury news timestamps (team PR / beat-writer posts) to test under-reaction until confirmation.
 3. Use the PredictDay stack as the pregame anchor instead of the venue's own pregame price. That is the one input not yet tested.
 4. Paid book or odds data, or any live execution, would need Tim's call. Not recommended given these results.
 
