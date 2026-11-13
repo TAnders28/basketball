@@ -1,6 +1,6 @@
 # In-play NBA swings - plain-language findings (final, Nov 12, 2026, about 9:40 PM PT; Round 7 added)
 
-**Verdict: PASS. Do not trade any of these rules.** We registered about 2,000 strategy variants. Each was tuned on 2024-25,
+**Verdict: PASS. Do not trade any of these rules.** We registered about 3,900 trials (about 2,000 strategy variants, plus Round 7 reruns of every Polymarket rule under three timings). Each was tuned on 2024-25,
 then scored once on 2025-26 and on 2026-27 to date. The market prices behaved like nearly calibrated probabilities. In-game
 swings are common, but buying dips or fading runs loses money once you pay the spread, fees, slippage and a one-minute delay.
 Typical cost is about 4-6c per contract per round trip. Every rule family is negative or indistinguishable from zero on the
