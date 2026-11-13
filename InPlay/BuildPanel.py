@@ -17,6 +17,10 @@ from InPlay.Align import AsOf, EspnStates, EtDate, IsoTs, KalshiMid, SeasonOf, T
 
 ROOT = os.path.join("data", "inplay")
 PRE_MIN = 30
+# Polymarket prices-history point labelled T moves with the Kalshi mid at T-60 (corr of 1-min changes 0.90 vs 0.06 at lag 0).
+# Either Polymarket is a minute slower (H1, shift 0) or its history labels are a minute late (H2, shift -60). The main run uses
+# H2 (contemporaneous with Kalshi), which removes the stale-fill advantage PM lag/momentum rules would otherwise get.
+PM_TS_SHIFT = int(os.environ.get("PM_TS_SHIFT", "-60"))
 POST_MIN = 3
 
 
@@ -47,7 +51,8 @@ def PmSeries(slug):
     path = os.path.join(ROOT, "polymarket", "prices", slug + ".json")
     if not os.path.exists(path):
         return None
-    hist = sorted(json.load(open(path, encoding="utf-8"))["history"], key=lambda h: h["t"])
+    hist = sorted(({"t": h["t"] + PM_TS_SHIFT, "p": h["p"]} for h in json.load(open(path, encoding="utf-8"))["history"]),
+                  key=lambda h: h["t"])
     return hist or None
 
 

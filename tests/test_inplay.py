@@ -172,6 +172,18 @@ class TestEngine(unittest.TestCase):
         self.assertAlmostEqual(tr[0]["entry"], 0.385)  # rested at the bid seen at signal (0.39-0.005)
 
 
+class TestMakerExit(unittest.TestCase):
+    def test_resting_target_needs_trade_through(self):
+        P = dict(pre_lo=0.55, pre_hi=0.65, entry=0.40, tmax=1440, tgt=0.50)
+        g = MakeGame([0.6, 0.39, 0.38, 0.45, 0.49, 0.49, 0.49])
+        g.trlo = [None, None, 0.375, None, None, None, None]
+        g.trhi = [None, None, None, 0.46, 0.50, 0.51, None]
+        tr = RunGame("dip_fav", P, g, slip=0.0, exec_mode="maker2")
+        self.assertEqual(tr[0]["why"], "maker_target")
+        self.assertAlmostEqual(tr[0]["exit"], 0.50)
+        self.assertAlmostEqual(TradePnl(tr[0], "kalshi_taker"), 0.50 - 0.385 - 0.0175 * 0.385 * 0.615 - 0.0175 * 0.25)
+
+
 class TestStats(unittest.TestCase):
     def test_traversals(self):
         self.assertEqual(Traversals([0.5, 0.25, 0.5, 0.75, 0.5, 0.2], 0.3, 0.7)[0], 2)

@@ -509,9 +509,57 @@ def ScoreMd(out):
     return "\n".join(md)
 
 
+def _RunGross(job):
+    """Frictionless replay: fills at the mid, no slippage, no fees. Measures gross edge only."""
+    fam, P, venue, xm = job
+    from InPlay.Engine import Game
+    out = defaultdict(list)
+    for g in _G[venue]:
+        sp = SplitOf(g.season)
+        if sp is None:
+            continue
+        h = Game(**{k: getattr(g, k) for k in Game.__slots__ if k != "n"})
+        h.bid, h.ask = list(g.mid), list(g.mid)
+        for tr in RunGame(EngineFamily(fam), P, h, slip=0.0, exec_mode="taker"):
+            out[sp].append((tr["day"], TradePnl(tr, "none")))
+    return job, dict(out)
+
+
+def Gross(workers):
+    with open(os.path.join(RES, "score.json"), encoding="utf-8") as h:
+        scored = json.load(h)
+    jobs = [(r["family"], r["params"], r["venue"], r["exec"]) for r in scored.values() if r["exec"] == "taker"]
+    rows, res = [], {}
+    md = ["## Gross edge check (fills at mid, no spread, no slippage, no fees)", "",
+          "Same trades as the taker backtest but frictionless. Near zero = the price is calibrated for that rule; the net results above are",
+          "then just costs.", "", "| family | venue | rule | split | trades | gross P/L per trade [95% CI, day clusters] |", "|---|---|---|---|---|---|"]
+    with ProcessPoolExecutor(max_workers=min(workers, 10), initializer=_Init) as ex:
+        for (fam, P, venue, xm), out in ex.map(_RunGross, jobs):
+            tid = TrialId(fam, P, venue, xm)
+            res[tid] = {}
+            for sp in ("tune", "holdout", "forward"):
+                lst = out.get(sp, [])
+                if not lst:
+                    continue
+                days = sorted({d for d, _ in lst})
+                dix = {d: k for k, d in enumerate(days)}
+                num, den = np.zeros(len(days)), np.zeros(len(days))
+                for d, p in lst:
+                    num[dix[d]] += p
+                    den[dix[d]] += 1
+                pt, lo, hi = RatioBootstrap(num, den, reps=1000)
+                res[tid][sp] = dict(n=len(lst), pnl=pt, lo=lo, hi=hi)
+                rows.append(dict(section="gross", venue=venue, split=sp, family=fam, trial_id=tid, fee_basis="none_mid_fills",
+                                 metric="pnl_per_trade", value=pt, lo=lo, hi=hi, n=len(lst), label=_Short(P)))
+                md.append(f"| {fam} | {venue} | {_Short(P)} | {sp} | {len(lst)} | {pt:+.4f} [{lo:+.4f}, {hi:+.4f}] |")
+    SaveRes("gross", res)
+    CsvRows(rows)
+    AppendMd("\n".join(md))
+
+
 def Main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True, choices=["games", "describe", "calib", "grid", "score"])
+    ap.add_argument("--stage", required=True, choices=["games", "describe", "calib", "grid", "score", "gross"])
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--splits", nargs="+", default=["tune"])
     args = ap.parse_args(argv)
@@ -540,6 +588,8 @@ def Main(argv=None):
         print(json.dumps(pbo, indent=1))
         for k, v in sorted(best.items(), key=lambda kv: -kv[1][0]):
             print(k, round(v[0], 4), v[1])
+    elif args.stage == "gross":
+        Gross(args.workers)
     elif args.stage == "score":
         with open(os.path.join(RES, "grid_tune.json"), encoding="utf-8") as h:
             tune = json.load(h)["tune"]

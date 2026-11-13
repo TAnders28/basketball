@@ -235,6 +235,21 @@ def RunGame(fam, P, G, lat=1, slip=0.005, exec_mode="taker", wait=3):
             pos = {"side": side, "i": j, "px": px, "mid0": mid0, "sig_i": i, "el": G.el[i], "maker": exec_mode != "taker"}
             i = j
             continue
+        if exec_mode == "maker2" and i > pos["i"]:
+            tgt = P.get("tgt")
+            if tgt is None and P.get("tgt_d") is not None:
+                tgt = round(pos["mid0"] + P["tgt_d"], 2)
+            if tgt is not None and tgt < 0.99:
+                lo, hi = G.trlo[i], G.trhi[i]
+                hit = (pos["side"] == 1 and hi is not None and hi > tgt + 1e-9) or \
+                      (pos["side"] == -1 and lo is not None and lo < 1.0 - tgt - 1e-9)
+                if hit:
+                    tr = _Close(G, pos, tgt, False, "maker_target")
+                    tr["maker_exit"] = True
+                    trades.append(tr)
+                    pos = None
+                    i += 1
+                    continue
         why = _ExitWanted(fam, P, G, i, pos) if i > pos["i"] else None
         if why and i + lat <= last:
             j = i + lat
@@ -262,5 +277,6 @@ def TradePnl(tr, basis):
         entry_basis = "kalshi_maker"
     pnl = tr["exit"] - tr["entry"] - Fee(tr["entry"], entry_basis)
     if not tr["settled"]:
-        pnl -= Fee(tr["exit"], basis)
+        exit_basis = "kalshi_maker" if (tr.get("maker_exit") and basis == "kalshi_taker") else basis
+        pnl -= Fee(tr["exit"], exit_basis)
     return pnl
