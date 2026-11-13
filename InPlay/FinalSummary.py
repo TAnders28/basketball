@@ -28,7 +28,7 @@ def Main():
     md = f"""
 ---------------------------------------------------------------------------------------------------------------------------
 
-# FINAL SUMMARY (written about 8:50 PM PT, Nov 12, 2026)
+# FINAL SUMMARY (written about 9:35 PM PT, Nov 12, 2026)
 
 **Verdict: PASS.** Nothing found is a tradable edge after fees, spread and a one-minute delay. In-play NBA prices on
 Kalshi and Polymarket are close to calibrated in every context tested. Under the two fee bases, costs are about 4-6c per
@@ -80,6 +80,14 @@ Other families (detail sections above):
 - espn_lag on recalibrated ESPN WP: -4.6c / -5.5c (holdout).
 - Directional maker off the Polymarket gap: -0.7c (holdout), +2.5c (forward). The forward number is likely a timestamp artifact
   and is marked to mid (see the Round 6A caveat).
+- Calm-stretch-only quoting (low recent volatility, market close to ESPN, no score change; tape-through fills): -0.84c per fill
+  [-1.53, -0.15] (holdout), -1.14c [-2.06, -0.35] (forward).
+- Last-2:00 possession and timeout cells: the best tune cell ("leader has the ball, trailer has 2+ timeouts") is +1.3c
+  [-2.7, +4.9] on Polymarket tune, so it did not qualify and no paper-log entry was added. Holdout: +0.9c (Polymarket) and
+  +0.6c (Kalshi), both with CIs around +/-4c.
+- 3c+ cross-venue gaps, time to close: under the final run's alignment, Kalshi reaches the Polymarket level in a median of
+  20 s (holdout) and 11 s (forward). Without the shift, Polymarket is the slower venue: it reaches the Kalshi mid within 5
+  minutes in 59-65% of gaps. Which venue is "slower" depends entirely on the timestamp question.
 - Gross (mid fills, no fees), holdout: about 0 for everything. espn_lag +0.3c, momentum +3c (CI includes 0).
 
 **Where the speed edge lives (Kalshi trade tape, 23,333 field goals):**
@@ -141,8 +149,7 @@ To score: `python -m InPlay.PaperScore`. Paper only: no routine was created and 
 1. Paper-score the frozen spec weekly with `InPlay.PaperScore` (no tuning).
 2. Settle the Polymarket timing question with a live side-by-side capture (Polymarket CLOB websocket vs Kalshi, a few
    games, paper only) before trusting any cross-venue or Polymarket-timing result (it is the open question behind Round 6A).
-3. If Tim wants more: possession- and timeouts-aware end-game cells, built from ESPN play-by-play.
-   Use the PredictDay stack as the pregame anchor instead of the venue's own pregame price.
+3. Use the PredictDay stack as the pregame anchor instead of the venue's own pregame price. That is the one input not yet tested.
 4. Paid book or odds data, or any live execution, would need Tim's call. Not recommended given these results.
 
 Code: branch `feature/inplay-swings`, HEAD {head} (local commits only, not pushed).
