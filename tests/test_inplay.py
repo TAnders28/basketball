@@ -285,5 +285,51 @@ class TestCiAuditAndTape(unittest.TestCase):
         self.assertEqual(st[2][0], "a")
         self.assertEqual(st[3][1]["a"], 1)
 
+import numpy as np
+
+from InPlay.Round7A import BestLag, ShiftSecondHalf
+from InPlay.Round7B import Fills as QueueFills
+from InPlay.Round7C import Implied, Trades as SpreadTrades
+
+
+class TestRoundSeven(unittest.TestCase):
+    def test_best_lag_and_second_half_only(self):
+        rng = np.random.default_rng(1)
+        n = 60
+        el = [60.0 * k for k in range(n)]
+        wp = list(np.clip(0.5 + np.cumsum(rng.normal(0, 0.03, n)), 0.01, 0.99))
+        px = [wp[0]] + wp[:-1]  # PM moves one bar after ESPN
+        self.assertEqual(BestLag(wp, px, el), 1)
+        sh = ShiftSecondHalf(px, el, 1)
+        self.assertEqual(sh[:24], px[:24])  # first half untouched (el < 1440)
+        self.assertEqual(sh[30], px[31])
+
+    def test_queue_fill_needs_volume_ahead(self):
+        g = MakeGame([0.50] * 10, spread=0.02)
+        g.wp = [0.5] * 10
+        # one taker sell of 100 at our bid (0.49) in bar 2's window, nothing through
+        tape = np.array([[g.t[2] + 10, 0.49, 100.0, -1]])
+        self.assertEqual(len(QueueFills(g, tape, "touch", None, 1)), 1)
+        self.assertEqual(len(QueueFills(g, tape, "fixed_50", None, 1)), 1)
+        self.assertEqual(len(QueueFills(g, tape, "fixed_250", None, 1)), 0)
+        self.assertEqual(len(QueueFills(g, tape, "through", None, 1)), 0)
+        tape2 = np.array([[g.t[2] + 10, 0.48, 1.0, -1]])  # print through our bid: level exhausted
+        self.assertEqual(len(QueueFills(g, tape2, "fixed_1000", None, 1)), 1)
+
+    def test_spread_implied_moneyline(self):
+        from statistics import NormalDist
+        nd = NormalDist(mu=4.0, sigma=10.0)
+        pts = [(k, 1 - nd.cdf(k)) for k in (-5.5, 1.5, 7.5, 12.5)]
+        self.assertAlmostEqual(Implied(pts), 1 - nd.cdf(0.5), places=6)
+        self.assertIsNone(Implied([(1.5, 0.5)]))
+
+    def test_spread_trade_enters_next_bar(self):
+        g = MakeGame([0.50] * 8, spread=0.02)
+        imp = [None, 0.60, None, None, None, None, None, None]
+        tr = SpreadTrades(g, imp, 0.05, 2)
+        self.assertEqual(len(tr), 1)
+        self.assertAlmostEqual(tr[0]["entry"], 0.51 + 0.005)  # ask of bar 2 + slip, not bar 1
+
+
 if __name__ == "__main__":
     unittest.main()
