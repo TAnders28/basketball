@@ -16,6 +16,7 @@ ALLOWED = {
     "gamma-api.polymarket.com": 0.30,
     "clob.polymarket.com": 0.25,
     "site.api.espn.com": 0.30,
+    "data-api.polymarket.com": 0.30,
 }
 HEADERS = {"Accept": "application/json", "User-Agent": "basketball-inplay-research/1.0 (read-only)"}
 _last = {}
