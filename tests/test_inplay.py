@@ -201,6 +201,30 @@ class TestStats(unittest.TestCase):
         val, n = Pbo(rng.normal(size=(64, 20)))
         self.assertTrue(0.0 <= val <= 1.0 and n > 0)
 
+class TestRoundTwoThree(unittest.TestCase):
+    def test_mm_fill_needs_trade_through_and_pull(self):
+        from InPlay.Round3 import MmFills
+        g = MakeGame([0.50, 0.50, 0.50, 0.50, 0.50, 0.50], won=1)
+        g.wp = [0.5] * 6
+        g.trlo = [None, 0.49, 0.495, 0.48, 0.49, 0.49]
+        g.trhi = [None, 0.51, 0.51, 0.51, 0.51, 0.51]
+        fills = MmFills(g, None, 1, 2880)
+        # quotes 0.495/0.505; only bar 3's trade low 0.48 prints through the 0.495 bid (quoted at bar 2)
+        buys = [f for f in fills if abs(f[2] - 0.005) < 1e-9 and f[3] == 0.0]
+        self.assertTrue(len(fills) >= 1)
+        self.assertAlmostEqual(fills[0][1], 0.50 - 0.495 - Fee(0.495, "kalshi_maker"))
+        g.wp = [0.5, 0.5, 0.6, 0.6, 0.6, 0.6]
+        pulled = MmFills(g, 0.02, 1, 2880)
+        self.assertLess(len(pulled), len(fills))
+
+    def test_surface_enters_next_bar_ask_and_settles(self):
+        from InPlay.Round2 import Cell, TradeSurface
+        g = MakeGame([0.6, 0.6, 0.30, 0.10, 0.10], won=1, pre=0.6, el=[1500, 1560, 1620, 1680, 1740], sd=[-5, -5, -6, -12, -12])
+        c = Cell(g, 2, 1)
+        tr = TradeSurface([g], {c: {}}, slip=0.0)
+        self.assertEqual(len(tr), 1)
+        self.assertAlmostEqual(tr[0]["entry"], g.ask[3])
+        self.assertEqual(tr[0]["exit"], 1.0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -98,7 +98,7 @@ def Main(argv=None):
     rows, res = [], {}
     for key, label in (("head", "fav 55-65 pregame dips <=0.40 in H1"), ("even", "trailer, even game (45-55), leader 75-90 before Q4 6:00"),
                        ("mis_leader_fav", "trailer, mismatch, favorite leads 75-90"), ("mis_leader_dog", "trailer, mismatch, underdog leads 75-90")):
-        allv = [v for s in by[key].values() for v in v]
+        allv = [x for s in by[key].values() for x in s]
         if not allv:
             continue
         p = np.array([a for a, _ in allv])
@@ -119,10 +119,10 @@ def Main(argv=None):
         vals = [v for s in pnl[k].values() for v in s if v is not None]
         if not vals:
             continue
-        pt, lo, hi = RatioBootstrap(vals, np.ones(len(vals)))
+        pt, lo, hi = RatioBootstrap(np.array(vals, dtype=float), np.ones(len(vals)))
         md.append(f"| {fam} {json.dumps(P)} | {len(vals)} | {pt:+.4f} | [{lo:+.4f}, {hi:+.4f}] |")
         rows.append(dict(section="espn_long_frictionless", venue="espn", split="2018-2027", family=fam, fee_basis="none",
-                         metric="pnl_per_trade", value=pt, lo=lo, hi=hi, n=len(vals), label=json.dumps(P)))
+                         metric="pnl_per_traded_game", value=pt, lo=lo, hi=hi, n=len(vals), label=json.dumps(P)))
         res[f"rule{k}"] = dict(fam=fam, P=P, n=len(vals), pnl=pt, lo=lo, hi=hi)
     SaveRes("espn_long", res)
     CsvRows(rows)
