@@ -263,6 +263,7 @@ def BuildFeatures(player_rows, season_games):
         if pid not in pst:
             pst[pid] = {
                 "name": name, "n": 0, "min": 0.0, "fg3m": 0.0, "fg3a": 0.0,
+                "pts": 0.0, "reb": 0.0, "ast": 0.0,
                 "ewma_min": None, "last_date": None, "mins": [],
             }
         return pst[pid]
@@ -339,6 +340,12 @@ def BuildFeatures(player_rows, season_games):
                 "prior_min": st["min"],
                 "prior_3pm": st["fg3m"],
                 "prior_3pa": st["fg3a"],
+                "prior_pts": st.get("pts") or 0.0,
+                "prior_reb": st.get("reb") or 0.0,
+                "prior_ast": st.get("ast") or 0.0,
+                "actual_pts": float(r.get("PTS") or 0),
+                "actual_reb": float(r.get("REB") or 0),
+                "actual_ast": float(r.get("AST") or 0),
                 "proj_min_raw": proj_min,
                 "pace": pace,
                 "opp_3pa100": opp_3pa100,
@@ -354,6 +361,9 @@ def BuildFeatures(player_rows, season_games):
             st["min"] += mins
             st["fg3m"] += float(r.get("FG3M") or 0)
             st["fg3a"] += float(r.get("FG3A") or 0)
+            st["pts"] = st.get("pts", 0.0) + float(r.get("PTS") or 0)
+            st["reb"] = st.get("reb", 0.0) + float(r.get("REB") or 0)
+            st["ast"] = st.get("ast", 0.0) + float(r.get("AST") or 0)
             st["mins"].append(mins)
             if st["ewma_min"] is None:
                 st["ewma_min"] = mins
@@ -574,6 +584,7 @@ def PregameRow(pid, name, team, opp, home, date, pst, tst, last_team_dates=None)
     """Assemble a single pregame feature row from the running state."""
     st = pst.get(pid) or {
         "name": name, "n": 0, "min": 0.0, "fg3m": 0.0, "fg3a": 0.0,
+        "pts": 0.0, "reb": 0.0, "ast": 0.0,
         "ewma_min": None, "last_date": None, "mins": [],
     }
     def team_metrics(abbr):
@@ -617,6 +628,9 @@ def PregameRow(pid, name, team, opp, home, date, pst, tst, last_team_dates=None)
         "prior_min": st.get("min") or 0.0,
         "prior_3pm": st.get("fg3m") or 0.0,
         "prior_3pa": st.get("fg3a") or 0.0,
+        "prior_pts": st.get("pts") or 0.0,
+        "prior_reb": st.get("reb") or 0.0,
+        "prior_ast": st.get("ast") or 0.0,
         "proj_min_raw": st.get("ewma_min"),
         "recent_mins": list(st.get("mins") or [])[-10:],
         "pace": pace,
@@ -647,3 +661,122 @@ def RangeRow(row, params, min_lo, min_hi, k_mult_lo=2.0, k_mult_hi=0.5):
         min_l, min_h = min_h, min_l
     return {"lam_lo": lo, "lam_hi": hi, "min_lo": min_l, "min_hi": min_h,
             "rate_lo": rate_lo, "rate_hi": rate_hi, "pct_lo": pct_lo, "pct_hi": pct_hi}
+
+
+
+STAT_KEYS = {
+    "pts": ("prior_pts", "actual_pts"),
+    "reb": ("prior_reb", "actual_reb"),
+    "ast": ("prior_ast", "actual_ast"),
+    "pra": None,  # derived
+}
+
+
+def _StatPair(row, family):
+    if family == "3pm":
+        return row.get("prior_3pm") or 0.0, row.get("actual_3pm") or 0.0
+    if family == "pra":
+        prior = (row.get("prior_pts") or 0.0) + (row.get("prior_reb") or 0.0) + (row.get("prior_ast") or 0.0)
+        actual = (row.get("actual_pts") or 0.0) + (row.get("actual_reb") or 0.0) + (row.get("actual_ast") or 0.0)
+        return prior, actual
+    keys = STAT_KEYS.get(family)
+    if not keys:
+        return 0.0, 0.0
+    return row.get(keys[0]) or 0.0, row.get(keys[1]) or 0.0
+
+
+def FitCountParams(train_rows, family):
+    """NB/EB per-minute rate model for PTS, REB, AST, or PRA. Frozen on train_rows."""
+    by_p = {}
+    for r in train_rows:
+        rec = by_p.setdefault(r["player_id"], {"min": 0.0, "stat": 0.0})
+        rec["min"] += r.get("actual_min") or 0.0
+        rec["stat"] += _StatPair(r, family)[1]
+    mu_rate, k_rate = EmpiricalBayesKRate(
+        [v["stat"] for v in by_p.values()],
+        [v["min"] for v in by_p.values()],
+        min_exp=200.0,
+    )
+    fit_rows = [r for r in train_rows
+                if r["prior_n"] >= 5 and (r["proj_min_raw"] or 0) >= MIN_PROJ]
+    paces = [r["pace"] for r in fit_rows if r["pace"] is not None]
+    opp3s = [r["opp_3pa100"] for r in fit_rows if r["opp_3pa100"] is not None]
+    league_pace = float(np.mean(paces)) if paces else 100.0
+    league_opp3 = float(np.mean(opp3s)) if opp3s else 35.0
+    pace_sd = max(float(np.std(paces, ddof=1)) if len(paces) > 2 else 3.0, 1.0)
+    opp3_sd = max(float(np.std(opp3s, ddof=1)) if len(opp3s) > 2 else 4.0, 1.0)
+    prepared = []
+    for row in fit_rows:
+        proj = float(min(max(row["proj_min_raw"] or 0.0, 0.0), 42.0))
+        prior_stat, _ = _StatPair(row, family)
+        rate = Shrink(prior_stat, row["prior_min"], mu_rate, k_rate)
+        base = max(proj * rate, 1e-6)
+        pace = row["pace"] if row["pace"] is not None else league_pace
+        opp3 = row["opp_3pa100"] if row["opp_3pa100"] is not None else league_opp3
+        prepared.append({
+            "y": _StatPair(row, family)[1],
+            "offset": math.log(base),
+            "x": [float(row["home"]), float(row["b2b"]),
+                  (pace - league_pace) / pace_sd, (opp3 - league_opp3) / opp3_sd],
+        })
+    y = [p["y"] for p in prepared]
+    offset = [p["offset"] for p in prepared]
+    x = [p["x"] for p in prepared]
+    beta = FitPoissonOffset(y, offset, x) if prepared else np.zeros(5)
+    lam = ApplyOffset(offset, x, beta) if prepared else np.array([])
+    alpha = MomentAlpha(y, lam) if len(y) else 0.0
+    return {
+        "family": family,
+        "mu_rate": mu_rate, "k_rate": k_rate,
+        "beta": [float(v) for v in beta],
+        "alpha": float(alpha),
+        "league_pace": league_pace, "league_opp3": league_opp3,
+        "pace_sd": pace_sd, "opp3_sd": opp3_sd,
+        "n_fit": len(prepared),
+        "ewma_halflife": EWMA_HALFLIFE,
+        "train_season": TRAIN_SEASON,
+    }
+
+
+def AttachCountPredictions(rows, params, family=None):
+    """Set lam_<family> on each row from a frozen count-model params dict."""
+    family = family or params.get("family")
+    mu_rate, k_rate = params["mu_rate"], params["k_rate"]
+    beta = params["beta"]
+    league_pace = params.get("league_pace") or 100.0
+    league_opp3 = params.get("league_opp3") or 35.0
+    pace_sd = params.get("pace_sd") or 3.0
+    opp3_sd = params.get("opp3_sd") or 4.0
+    for row in rows:
+        proj = row.get("proj_min")
+        if proj is None:
+            raw = row.get("proj_min_raw")
+            proj = 16.0 if raw is None else float(min(max(raw, 0.0), 42.0))
+            row["proj_min"] = proj
+        prior_stat, _ = _StatPair(row, family)
+        rate = Shrink(prior_stat, row.get("prior_min") or 0.0, mu_rate, k_rate)
+        base = max(proj * rate, 1e-6)
+        pace = row["pace"] if row.get("pace") is not None else league_pace
+        opp3 = row["opp_3pa100"] if row.get("opp_3pa100") is not None else league_opp3
+        pace_z = (pace - league_pace) / max(pace_sd, 1e-6)
+        opp3_z = (opp3 - league_opp3) / max(opp3_sd, 1e-6)
+        x = np.array([[float(row.get("home") or 0), float(row.get("b2b") or 0), pace_z, opp3_z]])
+        row[f"lam_{family}"] = float(ApplyOffset([math.log(base)], x, beta)[0])
+        row[f"rate_{family}"] = rate
+        row[f"alpha_{family}"] = params["alpha"]
+    return rows
+
+
+def FairGe(row, family, k, params=None):
+    """P(count >= k) from the attached lambda and frozen alpha."""
+    if family == "3pm":
+        lam = row.get("lam")
+        alpha = row.get("alpha") if row.get("alpha") is not None else (params or {}).get("alpha", 0.0)
+    else:
+        lam = row.get(f"lam_{family}")
+        alpha = row.get(f"alpha_{family}")
+        if alpha is None and params is not None:
+            alpha = params.get("alpha", 0.0)
+    if lam is None:
+        return None
+    return NbGe(k, lam, alpha or 0.0)
