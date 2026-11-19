@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-MAIN = Path(r"E:\Basketball\basketball")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
 OUT_DIR = Path(r"E:\AgentDocs\Basketbot\2026-11-13_four-factors")
 BASE = "2026-11-13_four-factors"
 SEASON_DIR = MAIN / "data" / "season"
@@ -484,5 +484,5 @@ if __name__ == "__main__":
         import traceback
         tb = traceback.format_exc()
         sys.stderr.write(tb); sys.stderr.flush()
-        Path(r"E:\Basketball\basketball\logs\2026-11-13_four-factors.exc").write_text(tb, encoding="utf-8")
+        Path(r"E:\AgentWorkspaces\Basketball\basketball\logs\2026-11-13_four-factors.exc").write_text(tb, encoding="utf-8")
         raise

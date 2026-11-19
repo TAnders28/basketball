@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-MAIN = Path(r"E:\Basketball\basketball")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
 if str(MAIN) not in sys.path:
     sys.path.insert(0, str(MAIN))
 

@@ -1,5 +1,5 @@
 ﻿# bootstrap.ps1 - (re)create the repo venv from requirements.lock.txt, then smoke test.
-# Usage (from E:\Basketball\basketball):  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
+# Usage (from E:\AgentWorkspaces\Basketball\basketball):  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 # Does not request admin / UAC.
 
 $ErrorActionPreference = 'Stop'

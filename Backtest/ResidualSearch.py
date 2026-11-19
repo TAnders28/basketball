@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-MAIN = Path(r"E:\Basketball\basketball")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
 OUT_DIR = Path(r"E:\AgentDocs\Basketbot\2026-11-13_residual-search")
 BASE = "2026-11-13_residual-search"
 EDGES_IN = Path(r"E:\AgentDocs\Basketbot\2026-11-13_bankroll-10k\2026-11-13_bankroll-10k_edges.csv")

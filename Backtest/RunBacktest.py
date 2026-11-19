@@ -1,5 +1,5 @@
 ﻿r"""
-One command, from E:\Basketball\basketball:
+One command, from E:\AgentWorkspaces\Basketball\basketball:
 
     .venv\Scripts\python.exe -m Backtest.RunBacktest --season 2024
     .venv\Scripts\python.exe -m Backtest.RunBacktest --season 2023,2024

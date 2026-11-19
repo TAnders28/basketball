@@ -4,7 +4,7 @@ Sources (all free / public, read-only):
 - Kalshi public trade API v2: https://api.elections.kalshi.com/trade-api/v2 (markets, candlesticks)
 - ESPN public site API: https://site.api.espn.com/apis/site/v2/sports/basketball/nba (scoreboard, summary)
 - NBA official injury report PDFs: https://official.nba.com/referee/injury/Injury-Report_<date>_<hh_mmAM>.pdf
-- Local games data: E:\\Basketball\\basketball\\data\\season\\games_<season>.json
+- Local games data: E:\\AgentWorkspaces\\Basketball\\basketball\\data\\season\\games_<season>.json
 
 Every network call can fail; every function returns None / [] on failure and records why in `errors`.
 Nothing here places orders or claims an edge.

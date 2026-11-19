@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-MAIN = Path(r"E:\Basketball\basketball")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
 EDGES_IN = Path(r"E:\AgentDocs\Basketbot\2026-11-13_bankroll-10k\2026-11-13_bankroll-10k_edges.csv")
 KALSHI_MARKETS = MAIN / "data" / "inplay" / "kalshi" / "markets.json"
 KALSHI_CANDLES = MAIN / "data" / "inplay" / "kalshi" / "candles"
@@ -1114,5 +1114,5 @@ if __name__ == "__main__":
         tb = traceback.format_exc()
         sys.stderr.write(tb)
         sys.stderr.flush()
-        Path(r"E:\Basketball\basketball\logs\2026-11-13_overreaction-fade.exc").write_text(tb, encoding="utf-8")
+        Path(r"E:\AgentWorkspaces\Basketball\basketball\logs\2026-11-13_overreaction-fade.exc").write_text(tb, encoding="utf-8")
         raise

@@ -23,8 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-MAIN = Path(r"E:\Basketball\basketball")
-WORKTREE = Path(r"E:\Basketball\basketball-wt-v3")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
+WORKTREE = Path(r"E:\AgentWorkspaces\Basketball\basketball-wt-v3")
 KALSHI_MARKETS = MAIN / "data" / "inplay" / "kalshi" / "markets.json"
 KALSHI_CANDLES = MAIN / "data" / "inplay" / "kalshi" / "candles"
 GAMES_META = MAIN / "data" / "inplay" / "games.pkl"
@@ -687,7 +687,7 @@ def WriteCalibrationMd(path: Path, summary: list, priced: list, dropped: list, t
     a("Simulation only. No wagers were placed.")
     a("")
     a("## Models")
-    a(f"- Headline: `stack_global`, leak-free walk-forward from worktree `E:\\Basketball\\basketball-wt-v3` at `6df88fe` (`feature/predictday-stack-default`). Freeze date: the commit date of 6df88fe (worktree HEAD `{hash_wt}`).")
+    a(f"- Headline: `stack_global`, leak-free walk-forward from worktree `E:\\AgentWorkspaces\\Basketball\\basketball-wt-v3` at `6df88fe` (`feature/predictday-stack-default`). Freeze date: the commit date of 6df88fe (worktree HEAD `{hash_wt}`).")
     a("- Shadow: `elo_predictday_v1` (phase-1 Elo replica mixed as a stack member and reported on its own).")
     a("- Market: `market_kalshi_T60`, the Kalshi home-YES mid at T-60, on the **same games**.")
     a("- The walk uses the official three-season windows and weekly EM mix (`contextual=False`, no EMOS). Postseason and play-in games are included leak-free so the 2025-26 holdout covers the full season; official PredictDay `LoadGames` is regular-season 002 only.")
@@ -938,5 +938,5 @@ if __name__ == "__main__":
         tb = traceback.format_exc()
         sys.stderr.write(tb)
         sys.stderr.flush()
-        Path(r"E:\Basketball\basketball\logs\2026-11-13_export-ops-vision.exc").write_text(tb, encoding="utf-8")
+        Path(r"E:\AgentWorkspaces\Basketball\basketball\logs\2026-11-13_export-ops-vision.exc").write_text(tb, encoding="utf-8")
         raise

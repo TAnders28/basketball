@@ -1,7 +1,7 @@
 """GutCall board feed: python -m Tools.Board --date YYYY-MM-DD
 
 Writes E:\\AgentDocs\\Basketbot\\_dashboard\\board_latest.json (atomic temp-file + rename) for Degen's GutCall
-dashboard, plus a dated copy board_<date>.json. Schema per the Degen brief (no E:\\GutCall\\gutcall\\SCHEMA.md
+dashboard, plus a dated copy board_<date>.json. Schema per the Degen brief (no E:\\AgentWorkspaces\\GutCall\\gutcall\\SCHEMA.md
 existed on 2026-11-14). Edges are (prob - ask - 0.02) x 100 in cents, where 0.02 is Tim's fee estimate. Every
 model is marked tested=false: none has a validated holdout edge. Unknowns are null, never invented.
 """
@@ -15,7 +15,7 @@ from Tools import Data
 from Tools.Data import EdgeCents, IsoEt, NowEt
 
 DASH = Path(r"E:\AgentDocs\Basketbot\_dashboard")
-GUTCALL_SCHEMA = Path(r"E:\GutCall\gutcall\SCHEMA.md")
+GUTCALL_SCHEMA = Path(r"E:\AgentWorkspaces\GutCall\gutcall\SCHEMA.md")
 PICK_DIRS = [DASH / "picks", Data.ROOT / "data" / "backtest" / "predictions"]
 
 

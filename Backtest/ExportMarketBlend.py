@@ -23,8 +23,8 @@ from pathlib import Path
 
 import numpy as np
 
-MAIN = Path(r"E:\Basketball\basketball")
-WORKTREE = Path(r"E:\Basketball\basketball-wt-v3")
+MAIN = Path(r"E:\AgentWorkspaces\Basketball\basketball")
+WORKTREE = Path(r"E:\AgentWorkspaces\Basketball\basketball-wt-v3")
 EDGES_IN = Path(r"E:\AgentDocs\Basketbot\2026-11-13_bankroll-10k\2026-11-13_bankroll-10k_edges.csv")
 OUT_DIR = Path(r"E:\AgentDocs\Basketbot\2026-11-13_market-blend")
 BASE = "2026-11-13_market-blend"
@@ -852,5 +852,5 @@ if __name__ == "__main__":
         tb = traceback.format_exc()
         sys.stderr.write(tb)
         sys.stderr.flush()
-        Path(r"E:\Basketball\basketball\logs\2026-11-13_market-blend.exc").write_text(tb, encoding="utf-8")
+        Path(r"E:\AgentWorkspaces\Basketball\basketball\logs\2026-11-13_market-blend.exc").write_text(tb, encoding="utf-8")
         raise
