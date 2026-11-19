@@ -43,3 +43,7 @@ Shared conventions for agents working in this repo. Keep changes small and local
 - Live AssessLive: with no validated in-play model, action is always **PASS** (`no live model`). Stale or misaligned quotes also **PASS**. Default freshness: quote 30s, game state 45s (CLI-overridable).
 - No cloud coding agents for this checkout unless Tim asks. **Push only when Tim explicitly says OK.** Local commits are fine when authorized.
 - Do not place orders or wagers from this repo.
+
+## Daily check reporting
+
+Per Tim (Nov 19, 2026): the daily NBA ML/props check stays quiet unless it finds an edge. Message Tim only when a play clears the 3c fee-adjusted threshold on a tested, frozen rule (hash must match), or when a step fails; never fail silently. On no-edge days, log the PASS line and board stats to E:\AgentDocs\Basketbot\daily-check\<YYYY-MM-DD>.md. The default fee is Kalshi's published fee formula, with Tim's flat $0.02/contract as a comparison.
