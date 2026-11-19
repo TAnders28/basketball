@@ -33,3 +33,7 @@ Thumbs.db
 
 # Parquet artifacts
 *.parquet
+
+# Scratch work and run logs (local only)
+/_scratch/
+/logs/
