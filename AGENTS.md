@@ -47,3 +47,10 @@ Shared conventions for agents working in this repo. Keep changes small and local
 ## Daily check reporting
 
 Per Tim (Nov 19, 2026): the daily NBA ML/props check stays quiet unless it finds an edge. Message Tim only when a play clears the 3c fee-adjusted threshold on a tested, frozen rule (hash must match), or when a step fails; never fail silently. On no-edge days, log the PASS line and board stats to E:\AgentDocs\Basketbot\daily-check\<YYYY-MM-DD>.md. The default fee is Kalshi's published fee formula, with Tim's flat $0.02/contract as a comparison.
+
+## Python environment
+
+- There is one venv, at `basketball\.venv`, shared by every worktree (including `basketball-wt-v3`). Worktrees do not get their own venv.
+- Always run it as `.venv\Scripts\python.exe -m <module>` (pip, unittest, pytest). From a worktree, use the full path `E:\AgentWorkspaces\Basketball\basketball\.venv\Scripts\python.exe -m <module>`.
+- Never run the `Scripts\*.exe` launchers (pip.exe, pytest.exe and so on) or `activate`. Windows Smart App Control blocks them and pops up warnings for Tim, and they still hold old paths.
+- Don't rebuild the venv.
